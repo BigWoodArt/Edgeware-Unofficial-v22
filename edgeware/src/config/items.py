@@ -126,6 +126,8 @@ CONFIG_ITEMS = {
     "subliminal_chance": Item("capPopChance", PERCENTAGE, IntVar, int),
     "subliminal_timeout": Item("capPopTimer", NONNEGATIVE, IntVar, int),
     "subliminal_opacity": Item("capPopOpacity", PERCENTAGE, IntVar, to_float),
+    "subliminal_text_color": Item("capPopTextColor", Schema(Union("White", "Black", "Pink")), StringVar, str),
+    "subliminal_outline_color": Item("capPopOutlineColor", Schema(Union("White", "Black")), StringVar, str),
     "notification_chance": Item("notificationChance", PERCENTAGE, IntVar, int),
     "notification_image_chance": Item("notificationImageChance", PERCENTAGE, IntVar, int),
 

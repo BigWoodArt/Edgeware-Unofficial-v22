@@ -30,6 +30,15 @@ if __name__ == "__main__":
 
     # Add mpv to PATH
     os.environ["PATH"] += os.pathsep + str(Data.ROOT)
+    try:
+        # PATH alone isn't reliably picked up by ctypes-based DLL loading on
+        # Windows since Python 3.8 ("safe DLL search mode") - this is the
+        # actually-reliable way to point it at libmpv-2.dll. Kept the PATH
+        # line above too since it's harmless and may still help in some
+        # setups; this is the one that actually matters on modern Python.
+        os.add_dll_directory(str(Data.ROOT))
+    except (AttributeError, OSError):
+        pass  # Not on Windows, or the directory doesn't exist yet
 
 import hashlib
 import logging
@@ -61,7 +70,7 @@ def panic(root: Tk, settings: Settings, state: State, condition: bool = True, di
             if password != settings.panic_lockout_password:
                 return
 
-        restore_panic_wallpaper(settings.replace_images)
+        restore_panic_wallpaper()
         state.keyboard_process.terminate()
         state.tray.stop()
         for popup in state.popups.copy():
@@ -94,18 +103,22 @@ def send_panic() -> None:
         connection.send(PANIC_MESSAGE)
 
 
-def restore_panic_wallpaper(check_for_replacement: bool) -> None:
+def restore_panic_wallpaper() -> None:
     saved = CustomAssets.panic_wallpaper()
 
     try:
         # We restore from the original wallpaper file rather than Edgeware's copy to avoid issues
         # when installed on a USB drive or after uninstalling.
         original = Path(Data.PANIC_WALLPAPER_LINK.read_text()).resolve()
-        was_overwritten = False
-        # When `settings.replace_images` is enabled, the original wallpaper file may be overwritten.
-        if check_for_replacement:
-            with original.open("rb") as of, saved.open("rb") as sf:
-                was_overwritten = hashlib.file_digest(of, "sha256") != hashlib.file_digest(sf, "sha256")
+        # The content at `original` can drift from our saved snapshot for reasons
+        # having nothing to do with settings.replace_images (which this used to be
+        # gated behind): Windows itself regenerates its wallpaper cache file every
+        # time the desktop wallpaper changes, including every change Edgeware's own
+        # wallpaper cycling makes during a session. By the time Panic fires, that
+        # path can easily no longer contain the real original wallpaper at all - so
+        # this check now always runs, not just when Replace Images is on.
+        with original.open("rb") as of, saved.open("rb") as sf:
+            was_overwritten = hashlib.file_digest(of, "sha256") != hashlib.file_digest(sf, "sha256")
         if was_overwritten:
             shutil.copy2(saved, original)
     except (OSError, AssertionError):

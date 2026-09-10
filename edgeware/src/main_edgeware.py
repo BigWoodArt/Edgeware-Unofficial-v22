@@ -31,6 +31,15 @@ if __name__ == "__main__":
 
     # Add mpv to PATH
     os.environ["PATH"] += os.pathsep + str(Data.ROOT)
+    try:
+        # PATH alone isn't reliably picked up by ctypes-based DLL loading on
+        # Windows since Python 3.8 ("safe DLL search mode") - this is the
+        # actually-reliable way to point it at libmpv-2.dll. Kept the PATH
+        # line above too since it's harmless and may still help in some
+        # setups; this is the one that actually matters on modern Python.
+        os.add_dll_directory(str(Data.ROOT))
+    except (AttributeError, OSError):
+        pass  # Not on Windows, or the directory doesn't exist yet
 
     def pyglet_run() -> None:
         import pyglet
@@ -47,9 +56,10 @@ from tkinter import Tk
 
 import utils
 from config import first_launch_configure
+from config.items import CONFIG_ITEMS
 from config.settings import Settings
 from features.audio import play_audio
-from features.corruption import corruption_danger_check, handle_corruption
+from features.corruption import handle_corruption
 from features.drive import fill_drive, replace_images
 from features.hibernate import main_hibernate, start_main_hibernate
 from features.image_popup import ImagePopup
@@ -68,7 +78,7 @@ from features.prompt import Prompt
 from features.startup_splash import StartupSplash
 from features.subliminal_popup import SubliminalPopup
 from features.video_popup import VideoPopup
-from os_utils import is_linux
+from os_utils import is_linux, is_windows
 from os_utils.linux_utils import get_desktop_environment
 from pack import Pack
 from panic import ensure_panic_wallpaper, start_panic_listener
@@ -76,6 +86,7 @@ from paths import Data
 from roll import RollTarget, roll_targets
 from scripting import run_script
 from state import State
+from voluptuous.error import Invalid
 
 
 def read_do_not_press_armed() -> bool:
@@ -88,6 +99,76 @@ def read_do_not_press_armed() -> bool:
         return bool(json.loads(Data.CONFIG.read_text()).get("_doNotPressArmed", 0))
     except Exception:
         return False
+
+
+def read_priority_mode() -> str:
+    """"Priority" is a config.pyw-only setting (see apply_pack_priority),
+    matching the exact strings its dropdown saves ("Pack Priority" /
+    "Default Priority"). Defaults to "Pack Priority" if missing or
+    malformed."""
+    try:
+        mode = json.loads(Data.CONFIG.read_text()).get("_priorityMode", "Pack Priority")
+        return mode if mode in ("Pack Priority", "Default Priority") else "Pack Priority"
+    except Exception:
+        return "Pack Priority"
+
+
+def apply_pack_priority(settings: Settings, pack: Pack) -> list[str]:
+    """When Priority is set to Pack (the default), apply every setting the
+    selected pack's own config.json declares directly onto the already-
+    constructed Settings object - reusing each Item's own schema/setting
+    callables from config/items.py, exactly like Settings.load_settings()
+    does for a normal config.json, rather than a separate reimplementation
+    that could drift out of sync with real validation/unit conversion.
+
+    This runs every time Edgeware actually starts, here in main_edgeware.py -
+    not inside config.pyw - specifically so it's a real guarantee regardless
+    of *how* Edgeware is launched (config.pyw's Save/Exit/Run, edgeware.pyw
+    directly, Do Not Press, Windows startup, a scheduled task, ...), not
+    something that only takes effect if config.pyw happened to be the thing
+    that launched it most recently."""
+    if read_priority_mode() != "Pack Priority":
+        # Default Priority means "ignore what the pack wants," full stop -
+        # not just its flat config.json (handled by returning early below),
+        # but also corruption's separate per-level escalation permission
+        # (corruption_full/corruptionFullPerm), a distinct mechanism gated
+        # by the same user-facing Priority choice. Forcing it off here is
+        # in-memory only for this session - it never overwrites the saved
+        # config.json - so a stale True value from an earlier Pack Priority
+        # session (or a manual toggle) doesn't linger and keep corruption's
+        # per-level config changes (and the danger warning they trigger)
+        # active even while Default Priority is selected.
+        settings.corruption_full = False
+        settings.config["corruptionFullPerm"] = 0  # see note below on why this also has to be set
+        return []
+    applied = []
+    for name, item in CONFIG_ITEMS.items():
+        if not item.setting or item.key not in pack.config:
+            continue
+        raw_value = pack.config[item.key]
+        try:
+            item.schema(raw_value)
+        except Invalid:
+            logging.warning(f'Pack config specifies invalid value "{raw_value}" for "{item.key}" - ignoring it')
+            continue
+        setattr(settings, name, item.setting(raw_value))
+        # Corruption's own level application (apply_corruption_level) calls
+        # settings.load_settings() every time a level applies - including
+        # essentially immediately at startup, for Timed/Popup/Script
+        # triggers - and that re-derives every setting FROM settings.config
+        # (the raw dict), not from whatever was just set above. Without also
+        # writing here, the very first corruption level would silently wipe
+        # out everything Pack Priority just applied, the moment it runs.
+        settings.config[item.key] = raw_value
+        applied.append(item.key)
+    if applied:
+        # A couple of settings are derived from others at load time (see the
+        # tail of Settings.load_settings()); recompute them in case a pack
+        # override just changed one of their inputs.
+        settings.hibernate_fix_wallpaper = settings.hibernate_fix_wallpaper and settings.hibernate_mode
+        settings.clickthrough_enabled = settings.clickthrough_enabled and is_windows()
+        logging.info(f"Pack Priority applied overrides for: {', '.join(applied)}")
+    return applied
 
 
 def pick_random_pack_path():
@@ -127,8 +208,12 @@ if __name__ == "__main__":
     pack = Pack(settings.pack_path)
     state = State()
 
+    apply_pack_priority(settings, pack)  # Before anything reads settings.corruption_mode etc. below
     settings.corruption_mode = settings.corruption_mode and pack.corruption_levels
-    corruption_danger_check(settings, pack)
+    # No confirmation dialog here (removed) - it blocked startup on a modal
+    # you-sure-about-this prompt, which is actively broken for an unattended
+    # session (e.g. Do Not Press): nobody there to click it. config.pyw
+    # already shows what a pack changes, non-blockingly, before you ever run it.
 
     # TODO: Use a dict?
     targets = [

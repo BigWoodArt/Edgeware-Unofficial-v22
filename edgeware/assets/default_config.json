@@ -80,6 +80,8 @@
   "capPopChance": 0,
   "capPopOpacity": 100,
   "capPopTimer": 300,
+  "capPopTextColor": "White",
+  "capPopOutlineColor": "Black",
   "subliminalsAlpha": 20,
   "messageOff": 0,
   "notificationChance": 0,

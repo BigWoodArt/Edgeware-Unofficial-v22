@@ -30,6 +30,15 @@ if __name__ == "__main__":
 
     # Add mpv to PATH
     os.environ["PATH"] += os.pathsep + str(Data.ROOT)
+    try:
+        # PATH alone isn't reliably picked up by ctypes-based DLL loading on
+        # Windows since Python 3.8 ("safe DLL search mode") - this is the
+        # actually-reliable way to point it at libmpv-2.dll. Kept the PATH
+        # line above too since it's harmless and may still help in some
+        # setups; this is the one that actually matters on modern Python.
+        os.add_dll_directory(str(Data.ROOT))
+    except (AttributeError, OSError):
+        pass  # Not on Windows, or the directory doesn't exist yet
 
 import logging
 import traceback

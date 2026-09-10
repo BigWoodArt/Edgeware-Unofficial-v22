@@ -23,6 +23,7 @@ from tkinter import Tk, messagebox
 import os_utils
 from config.items import CONFIG_DANGER, CORRUPTION_BLOCK, DangerLevel
 from config.settings import Settings
+from features.misc import send_notification
 from pack import Pack
 from pack.data import MoodSet
 from paths import Data
@@ -105,6 +106,12 @@ def apply_corruption_level(settings: Settings, pack: Pack, state: State) -> None
 def update_corruption_level(settings: Settings, pack: Pack, state: State) -> None:
     state.corruption_level = next_corruption_level(settings, pack, state)
     apply_corruption_level(settings, pack, state)
+    if settings.corruption_dev_mode:
+        # Reuses the same real desktop-notification mechanism as normal in-pack
+        # notifications, just with an explicit message instead of a random one
+        # from the pack - a lightweight way to see exactly when/whether a level
+        # change actually fired while testing a pack.
+        send_notification(settings, pack, notification=f"Corruption Level Increased to {state.corruption_level}")
 
 
 def fade(settings: Settings, pack: Pack, state: State) -> MoodSet:
