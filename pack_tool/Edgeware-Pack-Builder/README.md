@@ -3,20 +3,101 @@
 A GUI tool for building Edgeware++ resource packs from a folder of mood
 subfolders, without having to hand-write JSON or YAML.
 
+## Features
+
+- Point it at a folder of mood subfolders and it builds a full pack -
+  index, corruption levels, config, and (through the real Pack Tool
+  compiler) the final `.zip` - without hand-editing YAML or JSON.
+- **Media Review** page: review, add, or remove the images/videos/audio
+  and wallpaper for each mood - handy for touching up a pack someone
+  else made, not just fresh builds. Removing a file only excludes it
+  from the built pack; your original source folder is never touched.
+- **Per-Mood** page with a sidebar of mood tabs (cropped preview
+  thumbnails, click to switch), captions/notifications/subliminal text,
+  per-mood Advanced Settings (auto two-column on a wide enough window),
+  and mood removal rules.
+- Four built-in **Presets** (Slight Annoyance / Bit of a Problem / Real
+  Addiction / Life-Ending Slavery) that spread a full set of intensity
+  values across however many moods your pack has, plus standalone
+  Escalating Spirals and Escalating Denial ramps with their own
+  Start/End/Apply controls.
+- **Pack-Wide Settings**: Corruption mode, Hibernate mode, Mitosis mode
+  (+ strength), Level transition (Normal/Abrupt), and Buttonless popups,
+  all as simple on/off toggles.
+- Loads an existing pack (folder or `.zip`) back in for editing,
+  reusing its `plan.json` when present or reconstructing settings from
+  the pack's own files otherwise.
+- Background loading/building throughout - extracting a zip, scanning a
+  folder, generating media previews, and compiling the final pack all
+  run off the main thread with a progress indicator, so the window
+  never just freezes.
+- Every build writes a `<pack name>_build.log` next to the zip, and
+  offers to clean up the temporary working folders afterward.
+
+## Version History
+
+A quick-reference changelog, oldest to newest:
+
+- **v0.1** - Initial pack builder: folder-to-pack pipeline, per-mood
+  cards (captions/notifications/subliminal/prompts/web/advanced
+  settings) in a single scrolling page, wallpaper/audio pickers,
+  Escalating Spirals/Denial, four original presets, Load Existing Pack.
+- **v0.2** - Fixed a `corruptionTrigger` typo ("Popups" instead of
+  "Popup") that silently broke popup-count-based mood cycling; added a
+  reminder that "Allow full corruption permissions" has to be turned on
+  in Edgeware itself for any per-level escalation to apply; fixed
+  reconstruction only recovering the first mood when a corruption level
+  listed several; stopped stale files from old builds surviving into
+  new ones by wiping `pack_build/`/`pack_source/media/` before every
+  compile.
+- **v0.3** - Corrected subliminal-text keys (`capPopChance` /
+  `capPopOpacity` / `capPopTimer`) that had been conflated with the
+  hypno-overlay keys (`subliminalsChance` / `subliminalsAlpha`); added a
+  persistent build log file.
+- **v0.4** - Found and fixed the root cause of corruption levels not
+  triggering at all in real packs: Advanced Settings and presets could
+  produce fractional (non-integer) values, and Edgeware++'s loader
+  rejects the *entire* corruption file if even one value anywhere isn't
+  a plain int - now everything is rounded before it's written.
+- **v0.5** - All four presets replaced with new tiers (Slight Annoyance
+  / Bit of a Problem / Real Addiction / Life-Ending Slavery) covering a
+  much wider set of fields; added System Notification chance/image
+  fields and Popup Opacity; added the Pack-Wide Settings panel
+  (Corruption/Hibernate/Mitosis mode, Mitosis Strength).
+- **v0.6** - Per-Mood page redesigned around a sidebar of mood tabs with
+  cropped preview thumbnails (Pillow added as a dependency) instead of
+  one long scrolling list of collapsible cards; Advanced Settings made
+  always-visible instead of collapsed, with an auto two-column layout
+  on wide windows; loading a zip or folder now runs in the background
+  with a progress bar instead of freezing the window.
+- **v0.7** - Added Level Transition (Normal/Abrupt) and Buttonless
+  popups toggles; fixed a bug where some Advanced Settings on/off
+  toggles could stop responding to clicks.
+- **v0.8 (current)** - Added the Media Review page between
+  Whole-Experience Settings and Per-Mood: review/add/remove each mood's
+  images, videos, and audio (non-destructively), with Wallpaper moved
+  here from the Per-Mood page. Images and Videos display separately in
+  collapsible, 3-column preview grids and load lazily in the background
+  per mood, so opening the page or switching moods stays fast even on
+  packs with a lot of media.
+
 ## Requirements
 
 - **Python 3.10+** on Windows, with the box checked to "Add python.exe
   to PATH" during install (get it from python.org if you don't have it).
   Tkinter and Tcl/Tk ship with the standard Windows installer, so no
   extra install is needed for the GUI itself.
-- **pyyaml** - `run.bat` installs this automatically the first time you
-  run it. (If it's missing, pack.yml still gets written using a simple
-  fallback writer, just without pyyaml's cleaner formatting.)
+- **pyyaml** and **pillow** - `run.bat` installs both automatically the
+  first time you run it. (If pyyaml is missing, pack.yml still gets
+  written using a simple fallback writer, just without pyyaml's cleaner
+  formatting. Pillow is needed for the mood/media preview thumbnails -
+  without it, the app still runs, just with plain placeholders instead
+  of images.)
 
 ## How to run
 
-Double-click **`run.bat`**. It will check for/install `pyyaml`, then
-launch the app.
+Double-click **`run.bat`**. It will check for/install `pyyaml` and
+`pillow`, then launch the app.
 
 (Alternative: open a terminal in this folder and run
 `py edgeware_pack_builder_gui.py` directly.)
@@ -33,7 +114,8 @@ regardless of where you put the two folders.
 
 ## How to use it
 
-The app is three pages:
+The app is four pages: Source & Pack Tool, Whole-Experience Settings,
+Media Review, and Per-Mood Configuration.
 
 ### Page 1 - Source & Pack Tool
 
@@ -51,27 +133,34 @@ The app is three pages:
 
 ### Page 2 - Whole-Experience Settings
 
-- **Presets** - four one-click pacing curves (A Fun Distraction / A
-  Slight Annoyance / A Real Addiction / Total Enslavement), each
-  spreading a whole set of Advanced Settings knobs (popup speed, image/
-  video/web/prompt chance, audio/video volume and concurrency, spiral
-  chance/strength, denial chance, moving popups, and per-mood cycle
-  length) across every mood at once - later presets ramp faster and, on
-  several knobs, exponentially rather than evenly. You'll get a
-  confirmation warning first, since this overwrites Advanced Settings
-  for every mood. Applied values land as real, visible, editable numbers
-  in each mood's Advanced Settings on Page 3 - nothing about a preset is
-  hidden or locked in, it's just a fast starting point.
+- **Presets** - four one-click pacing curves (Slight Annoyance / Bit of
+  a Problem / Real Addiction / Life-Ending Slavery), each spreading a
+  full set of Advanced Settings knobs (popup speed, image/video/web/
+  prompt chance, audio volume/concurrency, video volume/concurrency,
+  auto-close/single-popup-mode, moving popups, subliminal text chance/
+  opacity/duration, system notification chance/image chance, and
+  per-mood cycle length) across every mood at once, on an exponential
+  curve - later moods ramp up faster than a straight line would. You'll
+  get a confirmation warning first, since this overwrites Advanced
+  Settings for every mood. Applied values land as real, visible,
+  editable numbers in each mood's Advanced Settings on the Per-Mood
+  page - nothing about a preset is hidden or locked in, it's just a
+  fast starting point. Presets don't touch the hypno overlay
+  (Spiral) fields - use the Escalating Spirals control below for that.
 - Pack info (name/ID/creator/version/description).
-- **Mood Cycling** - timer (in **seconds** now, not minutes - see note
-  below) or popup count, plus an optional "ramp cycle length across
-  moods" Start/End + Apply that spreads different cycle lengths per
-  mood (e.g. early moods last longer, later ones cycle faster).
+- **Mood Cycling** - timer (in **seconds**) or popup count, plus an
+  optional "ramp cycle length across moods" Start/End + Apply that
+  spreads different cycle lengths per mood (e.g. early moods last
+  longer, later ones cycle faster).
+- **Pack-Wide Settings** - things Edgeware++ can only apply to the
+  whole pack at once, not per mood: **Corruption mode**, **Hibernate
+  mode**, **Mitosis mode** (with a Strength slider, 2-10, grayed out
+  unless Mitosis mode is on), and **Level transition** (Normal/Abrupt -
+  Abrupt shown in red) and **Buttonless popups** toggles.
 - **Escalating Spirals** and **Escalating Denial** - each has a Start %/
-  End % and an Apply button. The Spiral checkbox alone still works as
-  a build-time-only auto-ramp if you don't click Apply; Apply instead
-  writes the actual per-mood numbers into Advanced Settings on Page 3 so
-  you can see and hand-tune them.
+  End % and an Apply button, which writes the actual per-mood numbers
+  into Advanced Settings on the Per-Mood page so you can see and
+  hand-tune them afterward.
 - Pack-wide extras (hypno overlay images, a default wallpaper, a loading
   screen image), and build options (image/video compression, filename
   renaming) if a Pack Tool folder is set.
@@ -90,31 +179,73 @@ before this change, its cycle length will reset to the default (5
 minutes' worth, now expressed as 300 seconds) since the field was
 renamed - a one-time inconvenience, not a repeating one.
 
-### Page 3 - Per-Mood Configuration
+### Page 3 - Media Review
 
-Each mood gets a collapsed card - click its name to expand. Inside:
+A sidebar of mood tabs (same cropped-thumbnail style as the Per-Mood
+page) down the left; pick a mood to review its media on the right.
+
+- **Images** and **Videos** - separate, independently collapsible
+  sections, each showing a 3-column grid of preview thumbnails (videos
+  show a plain icon, not an actual frame - the tool doesn't pull real
+  video previews). Each tile has a **Remove** button; **Add Images...**/
+  **Add Videos...** bring in more. Removing a file here only excludes it
+  from what gets built - your original source folder is never touched
+  or deleted from.
+- **Audio** - same idea, a plain list with Remove/Add Audio Files.
+- **Wallpaper** - the per-mood wallpaper picker lives here now (moved
+  from the Per-Mood page).
+
+The first time you open a mood here, whatever's currently governing its
+media (a folder scan, or an already-explicit file list) gets turned
+into one concrete, editable list - from then on, that list is what
+actually gets built, regardless of what's added to or removed from the
+original source folder afterward. A mood you never click into on this
+page is untouched and just uses its folder contents normally.
+
+Loading previews runs in the background with a progress indicator, and
+only for the mood you're currently looking at - switching to a mood you
+haven't opened yet loads its previews on the spot; switching back to
+one you've already viewed is instant.
+
+### Page 4 - Per-Mood Configuration
+
+A sidebar of mood tabs down the left (150px, with a cropped preview
+thumbnail and the mood's name - crimson when selected, gray otherwise);
+pick a mood to edit its settings on the right. Both the sidebar and the
+main panel scroll independently if there's more content than fits.
+Switching tabs never loses anything you've typed - every mood's fields
+stay alive in memory for the whole time you're on this page, only
+hidden, not rebuilt, when you switch away.
+
+Inside each mood's settings:
 
 - **Captions / Notifications / Subliminal messages / Prompts / Denial
   captions / Website popups** - all free text, one per line, per mood.
   Website popups support an optional `| arg1, arg2` suffix on a line to
   have one argument picked at random and appended to the URL (e.g.
   `https://example.com/search?q= | kittens, puppies`).
-- **Wallpaper** - a background image to switch to when this mood starts.
 - **Remove these moods when this one starts** - only lists moods that
   come *before* this one in the list (a mood can't remove something
   that isn't active yet). Leave everything unchecked and this mood's
   content just adds on top of what's already showing; check specific
   earlier moods to turn them off.
-- **Advanced Settings** (collapsed by default) - popup speed, image/
-  video/web/prompt chance, audio/video volume and concurrency, hypno
-  overlay chance/strength, subliminal text chance/opacity/duration,
-  denial chance, moving-popup chance/speed, and a per-mood cycle-length
-  override (in seconds, or popup count - whichever matches the cycle
-  mode picked on Page 2). Leaving a field blank means "keep whatever the
-  previous mood had" - it does not reset to a default. This is also
-  where Presets and the Page 2 Apply buttons (spiral/denial/cycle
-  length) write their values, so after using any of those you'll see
-  real numbers already filled in here, ready to hand-tune.
+- **Advanced Settings** - always visible below the fields above (no
+  more expand/collapse), automatically laid out in two columns per
+  group instead of one if the window's wide enough when the page is
+  built. Covers popup speed, image/video/web/prompt chance, auto-close/
+  single-popup-mode (on/off switches, not text fields), audio/video
+  volume and concurrency, hypno overlay chance/strength, subliminal
+  text chance/opacity/duration, system notification chance/image
+  chance, popup opacity, denial chance, moving-popup chance/speed, and
+  a per-mood cycle-length override (in seconds, or popup count -
+  whichever matches the cycle mode picked on Page 2). Leaving a numeric
+  field blank, or leaving an on/off switch on its "(inherit)" state,
+  means "keep whatever the previous mood had" - it does not reset to a
+  default; click an on/off switch to cycle inherit -> ON -> OFF ->
+  inherit. This is also where Presets and the Page 2 Apply buttons
+  (spiral/denial/cycle length) write their values, so after using any
+  of those you'll see real numbers already filled in here, ready to
+  hand-tune.
 
   **Two different "subliminal" features, easy to mix up:** Edgeware++
   has a hypno/spiral picture overlay (config keys `subliminalsChance` /
@@ -164,13 +295,20 @@ folder - everything is organized predictably from there:
   includes a `plan.json`, so anyone you send it to can drop it straight
   into **Load Existing Pack** here and get an exact (not reconstructed)
   copy to keep editing.
-  `pack_source`/`pack_build` are working files, safe to delete once
-  you've confirmed the zip works.
+- `<PackName>_build.log`, also right inside that folder - the full
+  compiler output for this build, every time, not just when something
+  looks off.
 
 A progress bar runs while this happens (compiling can take a while on
 larger packs). It's an indeterminate spinner, not a percentage - the
 Pack Tool compiler doesn't report incremental progress, so a real
 percentage isn't available to show.
+
+After a successful build, you'll be asked whether to delete the
+temporary working files (`pack_source/`, `pack_build/`, and - if this
+pack was loaded from a `.zip` - the original extracted copy in
+`loaded_packs/`), since everything in them is already inside the
+finished zip at that point.
 
 ## Loading a pack
 
@@ -203,24 +341,15 @@ Two buttons on Page 1: **Load Existing Pack (Folder)** and **(ZIP)**.
 
 ## What to test / report back
 
-- **Does the cycle-length number in seconds actually match real in-game
-  timing?** This is the main open question from this build (see the
-  seconds/minutes note above).
-- Do the four presets feel right? These are a first draft, not
-  something final - specific numbers are easy to adjust once you've
-  seen them play out in-game.
-- Does the finished pack load correctly in Edgeware++?
-- **Does mood 1's content show up immediately when the pack loads, or
-  only after the first mood-cycle interval elapses?** Every mood now
-  gets explicitly activated by its own corruption level (no more
-  reliance on Edgeware's reserved "default" mood, which testing showed
-  doesn't reliably display its content even when nominally active).
-  This is the one open question I couldn't verify without running
-  Edgeware myself.
-- Do the Advanced Settings values actually show up/behave as expected
-  in-game (popup speed, spiral strength, etc)?
+- Do the four presets feel right in-game? Numbers are easy to adjust
+  once you've seen them play out.
+- Do the Pack-Wide Settings (Hibernate/Mitosis mode especially) behave
+  as expected? These haven't been tested in-game yet from this tool.
 - Does loading a pack with no `plan.json` produce a reasonable
   reconstruction? What's in the warning banner, if anything?
+- Does the Media Review page correctly reflect what's actually in a
+  pack you load, and does removing a file there actually keep it out of
+  the rebuilt pack?
 - Any tooltip that's confusing, wrong, or missing.
 - Any error dialog - screenshot it, the full text is usually copyable
   and helps a lot for tracking down what happened.
@@ -237,13 +366,11 @@ Two buttons on Page 1: **Load Existing Pack (Folder)** and **(ZIP)**.
   can't be found at build time, the build now stops with a clear error
   naming exactly which mood and file - it used to fail silently and
   ship a pack with a black wallpaper instead. If you hit this, re-pick
-  that wallpaper on the Per-Mood page.
-- No numeric "notification frequency" dial - notification *text* is
-  per-mood, but Edgeware++'s published config reference doesn't list a
-  separate frequency knob for notifications specifically. Notifications
-  continuing to display for a bit after hitting Panic also looks like
-  core Edgeware behavior (already-fired notifications running out their
-  own timer) rather than something this tool's config controls.
+  that wallpaper on the Media Review page.
+- Video thumbnails on the Media Review page are a plain icon, not an
+  actual frame from the file - getting a real preview frame would mean
+  adding a video-processing dependency just for that, which didn't seem
+  worth it for a preview thumbnail.
 - Dangerous system settings (junk-file filling, disabling the panic
   button) are intentionally left out of this tool entirely.
 - Some images (webp especially) may render as a black square in
