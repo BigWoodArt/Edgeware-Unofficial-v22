@@ -13,7 +13,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP = "Edgeware++ Configuration"
-VERSION = "22.0.8"
+VERSION = "22.0.9"
 DO_NOT_PRESS_KEY = "_doNotPressArmed"
 HERE = Path(__file__).resolve().parent
 DATA = HERE / "data"

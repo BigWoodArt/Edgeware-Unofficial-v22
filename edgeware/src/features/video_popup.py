@@ -15,8 +15,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Edgeware++.  If not, see <https://www.gnu.org/licenses/>.
 
+import logging
 from pathlib import Path
-from tkinter import Tk
+from threading import Thread
+from tkinter import TclError, Tk
 from typing import Callable
 
 from config.settings import Settings
@@ -32,9 +34,35 @@ class VideoPopup(Popup):
         self.media = media or pack.random_video()
         if not self.should_init(settings, state):
             return
-        super().__init__(root, settings, pack, state, on_close)
+        self._pending_root, self._pending_settings, self._pending_pack, self._pending_state, self._pending_on_close = root, settings, pack, state, on_close
+        # get_video_properties() spawns ffprobe and blocks waiting for it -
+        # on the main thread, that would freeze the whole program (every
+        # popup, every click) for however long that takes, every single
+        # time a video is about to appear, and the more video-heavy a pack
+        # is, the more often. Probing on a background thread instead, and
+        # only creating the actual popup once its final size is already
+        # known, avoids both the freeze and a jarring resize-into-place
+        # after the window is already visible.
+        Thread(target=self._probe, daemon=True).start()
 
-        properties = get_video_properties(self.media)
+    def _probe(self) -> None:
+        try:
+            properties = get_video_properties(self.media)
+        except Exception as e:
+            logging.warning(f"Failed to read video properties for {self.media}: {e}")
+            self._pending_state.video_number -= 1  # Undo should_init()'s reservation - this popup never shows
+            return
+        try:
+            self._pending_root.after(0, lambda: self._finish_init(properties))
+        except TclError:
+            self._pending_state.video_number -= 1  # App is shutting down - same as above
+
+    def _finish_init(self, properties: dict) -> None:
+        # Not "self._pending_root" etc. here - Tkinter's own Misc._root is a
+        # bound method, and a same-named plain attribute on self would shadow
+        # it and break widget creation, hence the "_pending_" staging names.
+        super().__init__(self._pending_root, self._pending_settings, self._pending_pack, self._pending_state, self._pending_on_close)
+
         self.compute_geometry(properties["width"], properties["height"])
 
         self.player = VideoPlayer(self, self.settings, self.width, self.height)

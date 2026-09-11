@@ -641,3 +641,42 @@ fix are both textbook, well-documented Python/Windows behavior, not a
 guess.
 
 Version bumped to v22.0.8.
+
+## 24. v22.0.9 - real fix: video popups freezing all clicks, especially in video-heavy packs
+
+**Root cause, confirmed by reading the actual code path:** every time a
+video popup was about to appear, `get_video_properties()` (in
+`video_popup.py`) spawned `ffprobe.exe` and waited for it to finish -
+synchronously, on the same thread that runs Tkinter's entire event loop.
+While that's running, nothing in the whole program can respond to input,
+including clicks on unrelated image popups already on screen - the OS
+still queues the clicks, but Tk can't drain that queue until ffprobe
+returns. That exactly explains the reported symptom: images not closing on
+click, then several closing at once right as a video popup appears - the
+queued clicks all firing together the instant the freeze ends. Confirmed
+`VideoPlayer.play()` itself is not a second freeze point (it launches mpv
+via a non-blocking `subprocess.Popen` in the default mpv-subprocess mode).
+Hardware acceleration was never related - this freeze happens before mpv
+or any decoding is involved.
+
+**Fix:** `get_video_properties()` now runs on a background thread, and the
+popup window itself isn't created until the probe returns - avoiding both
+the freeze and a jarring resize-into-place after the window is already
+visible (the window now simply appears a beat later than before, already
+correctly sized, rather than appearing immediately and blocking everything
+while it resizes). `state.video_number`'s reservation is correctly rolled
+back if the probe fails or the app is shutting down mid-probe, so a failed
+video doesn't permanently eat into `max_video`'s cap.
+
+Verified directly: measured the constructor returning in ~0.2ms instead of
+blocking for the probe's duration, confirmed a simulated click scheduled
+during a simulated slow (300ms) probe fires exactly on time instead of
+being delayed, and confirmed the popup successfully completes full
+initialization (correct geometry from the probed dimensions, `.player`
+created, `init_finish()` reached) once the probe returns. Caught and fixed
+a real bug of my own along the way: an early draft used `self._root` as a
+staging attribute name, which collided with Tkinter's own internal
+`Misc._root` method and broke widget creation - renamed to `_pending_root`
+etc. before shipping.
+
+Version bumped to v22.0.9.
