@@ -4,9 +4,9 @@
 audio, prompts, and more) over your screen, highly customizable via downloadable "packs."
 It can be ended at any time and scheduled for more passive use.
 
-This is a personal patch on top of [Araten \& Marigold's Edgeware++](https://github.com/araten10/EdgewarePlusPlus)
+This is a personal patch on top of [Araten & Marigold's Edgeware++](https://github.com/araten10/EdgewarePlusPlus)
 (latest official release: v21) - all credit for the original program goes to them. It
-fixes several bugs and rebuilds `config.pyw` into a proper tool with extra features,
+fixes several real bugs and rebuilds `config.pyw` into a proper tool with extra features,
 including an optional **Do Not Press** mode (see Usage below). Full list of changes is in
 the Changelog at the bottom.
 
@@ -17,7 +17,6 @@ only via settings you explicitly turn on yourself - none of that is on by defaul
 
 **This also includes my new Pack Builder, which you can download separately at**
 [https://github.com/BigWoodArt/Edgeware-Pack-Builder](https://github.com/BigWoodArt/Edgeware-Pack-Builder)
-
 
 
 ## Installation
@@ -42,7 +41,6 @@ Read the "About" tab in the config window and back up your data before touching 
 more disruptive settings.
 
 
-
 ## Usage
 
 Open `config.pyw` to pick a pack and change settings, then either **Save, Exit, and Run**
@@ -52,8 +50,6 @@ to launch immediately, or just **Save and Exit** and run `edgeware.pyw` later. P
 `config.pyw` also has: WebP⇄GIF conversion tools, intensity presets, a Corruption
 Preview tab, and a **Priority** setting deciding whether your saved settings or a
 selected pack's own settings win when they disagree.
-
-
 
 **Do Not Press** is an optional button in `config.pyw`'s sidebar. Pressing it opens a
 confirmation screen (not a single accidental click) asking for a safeword, a lockout
@@ -72,13 +68,11 @@ This repeats every time Edgeware starts until you press "Disarm" in the sidebar,
 `data/config.json` directly.
 
 
-
 ## Bugs / issues
 
 This is a personal patch, maintained casually. For bugs in upstream Edgeware++ itself,
 use [their issues page](https://github.com/araten10/EdgewarePlusPlus/issues). For bugs
 specific to this fork's changes, open an issue here.
-
 
 
 ## Content Removal Policy
@@ -87,21 +81,18 @@ If you own art or assets used by this program or its linked demo packs and want 
 removed, reach out and we'll work it out.
 
 
-
 ## License
 
 Edgeware++ (as of April 28, 2025) is licensed under GPLv3 or later. Contributions prior
 to that date are licensed under MIT. This fork retains the same license.
 
 
-
 ## Changelog
 
 Roughly newest to oldest. This is a summary - see
-[V22\_PATCH\_NOTES.md](V22_PATCH_NOTES.md) if you want the full blow-by-blow.
+[V22_PATCH_NOTES.md](V22_PATCH_NOTES.md) if you want the full blow-by-blow.
 
 **The biggest changes, regardless of version number:**
-
 * Animated WebP images no longer show up as a black square - ffmpeg/mpv genuinely cannot
 decode them at all, so they're now played back natively instead of being handed to mpv.
 * Edgeware would fail to start at all on Python 3.8+ due to a DLL-loading issue in how
@@ -110,6 +101,26 @@ it locates libmpv - fixed.
 * A pack's own settings (under Pack Priority) were being silently wiped out the instant
 corruption's first level applied - fixed.
 * Popups appearing behind other windows, especially right after launching - fixed.
+
+**v22.1.0** - Real scraper built for the Gelbooru-engine family of sites
+(Gelbooru, RealBooru, Hypnohub, Rule34, Safebooru, Xbooru, Tbib, Atfbooru,
+Behoimi) - JSON API first, falls back to scraping the search page directly
+when the API is down or unusable (which is exactly what was silently
+breaking downloads on 2 of these sites), with proper full-resolution image
+resolution instead of guessing at URLs. The other 3 site families are
+shown dimmed in the checklist as a "not rebuilt yet" reminder - still
+clickable, not locked. Also: the Windows Startup shortcut (including
+during Do Not Press arming) could fail completely silently with zero
+indication anything went wrong - now actually detects and reports that.
+Site checklist no longer gets cut off on narrower windows. Video popups no
+longer flash a full-size blank window right before playback starts.
+
+**v22.0.11** - Video popups freezing every click on-screen, especially in
+video-heavy packs, while a video's size was being read - fixed by moving
+that off the main thread. Online image downloads expanded from a hardcoded
+single site (Gelbooru) to a checkbox list of ~18 sites (search picks one at
+random each time), plus a working minimum-score filter that was previously
+defined but never actually implemented.
 
 **v22.0.8** - Edgeware wouldn't start at all on newer Python, due to the DLL-loading
 issue above.
@@ -142,4 +153,3 @@ appearing behind other windows. Panic now auto-captures your wallpaper automatic
 and no longer goes black if the captured file gets overwritten later. Fixed "Run when
 Windows starts" being cosmetic-only. `config.pyw` rebuilt with WebP⇄GIF conversion
 tools, intensity presets, and pack override visibility.
-

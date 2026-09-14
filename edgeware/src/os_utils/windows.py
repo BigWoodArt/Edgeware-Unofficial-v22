@@ -98,12 +98,23 @@ def make_shortcut(title: str, process: Path, icon: Path, location: Path | None =
         )  # write built shortcut script text to temporary batch file
 
     try:
-        subprocess.run(bat.name)
+        result = subprocess.run(bat.name, capture_output=True, text=True)
     except Exception as e:
-        logging.warning(f"failed to call or remove temp batch file for making shortcuts\n\tReason: {e}")
+        raise OSError(f"Couldn't run the shortcut-creation script: {e}") from e
+    finally:
+        if os.path.exists(bat.name):
+            os.remove(bat.name)
 
-    if os.path.exists(bat.name):
-        os.remove(bat.name)
+    # subprocess.run() has no way to know the VBS script's own internal
+    # result - "cscript /nologo" suppresses the interpreter banner but not
+    # a script-level error (e.g. WshShortcut.Save failing because the
+    # target folder is a OneDrive-synced Desktop that refused the write),
+    # and that failure doesn't turn into a nonzero exit code or a raised
+    # Python exception either way. The only way to actually know if this
+    # worked is to check whether the .lnk file exists afterward.
+    if not file.exists():
+        detail = result.stdout.strip() or result.stderr.strip() or "no further detail was reported"
+        raise OSError(f'Shortcut "{file}" was not created ({detail})')
 
 
 def toggle_run_at_startup(state: bool) -> None:

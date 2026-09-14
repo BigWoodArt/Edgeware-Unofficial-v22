@@ -18,19 +18,87 @@
 import asyncio
 import logging
 from pathlib import Path
-from random import randint
+from random import choice, randint
 from tkinter import Label, TclError, Tk
 from typing import Callable
 
 import booru
 import requests
 from config.settings import Settings
+from features import booru_scraper
 from features.popup import Popup
 from features.video_player import VideoPlayer
 from pack import Pack
 from PIL import Image, ImageTk
 from roll import roll
 from state import State
+
+# Every site the "booru" package supports, minus Lolibooru - not included,
+# not configurable, not up for discussion via a pack's own config either
+# (see download_booru_image below, which re-checks against this same list
+# regardless of what a pack or saved config claims booru_sites contains).
+ALLOWED_BOORU_SITES = {
+    "Atfbooru", "Behoimi", "Danbooru", "Derpibooru", "E621", "E926", "Furbooru",
+    "Gelbooru", "Hypnohub", "Konachan", "Konachan_Net", "Paheal", "Realbooru",
+    "Rule34", "Safebooru", "Tbib", "Xbooru", "Yandere",
+}
+
+
+def download_booru_image(settings: Settings) -> str | None:
+    """Search a random site from settings.booru_sites (comma-separated) for
+    an image matching settings.booru_tags, filtered by settings.booru_min_score.
+    Returns an image URL, or None if nothing usable was found. Never raises -
+    any failure (bad site name, network error, no results, an unfamiliar
+    response shape) just means "nothing found", left for the caller to fall
+    back to the pack's own local image the same way a tag search finding
+    nothing already does.
+
+    Gelbooru-engine-family sites (see booru_scraper.GELBOORU_FAMILY_DOMAINS)
+    go through booru_scraper instead of the third-party "booru" package,
+    since that package only speaks each site's JSON API, and as of writing
+    two of these sites' JSON APIs are broken in ways no client can fix
+    (Gelbooru requires credentials it was never sent; RealBooru's API is
+    reported dead server-side). Every other site stays on the "booru"
+    package - not reported broken, not rewritten.
+
+    "Score" isn't guaranteed to be a consistent field across every site's API,
+    so this is deliberately lenient: a result missing score info is kept
+    rather than discarded, only ones with a score below the threshold are
+    dropped. This is best-effort filtering, not a hard guarantee for every
+    site.
+    """
+    requested = {name.strip() for name in settings.booru_sites.split(",") if name.strip()}
+    valid_sites = list(requested & ALLOWED_BOORU_SITES)
+    if not valid_sites:
+        return None
+
+    site = choice(valid_sites)
+
+    if site in booru_scraper.GELBOORU_FAMILY_DOMAINS:
+        try:
+            for url in booru_scraper.search_gelbooru_family(site, settings.booru_tags, settings.booru_min_score, api_key=settings.booru_api_key, user_id=settings.booru_user_id):
+                return url  # Already shuffled inside search_gelbooru_family() - first is as good as random
+        except Exception as e:
+            logging.warning(f'booru_scraper failed for "{site}": {e}')
+        return None
+
+    site_obj = getattr(booru, site)()
+    results = booru.resolve(asyncio.run(site_obj.search(query=settings.booru_tags, limit=20)))
+    if not results:
+        return None
+
+    for post in results:
+        score = post.get("score")
+        if isinstance(score, (int, float)) and score < settings.booru_min_score:
+            continue
+        try:
+            return post["file_url"]
+        except KeyError:
+            try:
+                return post["file"]["url"]
+            except (KeyError, TypeError):
+                continue
+    return None
 
 
 class ImagePopup(Popup):
@@ -41,15 +109,15 @@ class ImagePopup(Popup):
             return
         super().__init__(root, settings, pack, state, on_close)
 
-        # TODO: Better booru integration
         if self.settings.booru_download and roll(50):
             try:
-                gel = booru.Gelbooru()
-                result = booru.resolve(asyncio.run(gel.search_image(query=self.settings.booru_tags, limit=1)))
-                data = requests.get(result[0], stream=True)
+                url = download_booru_image(self.settings)
+                if not url:
+                    raise ValueError("No qualifying results")
+                data = requests.get(url, stream=True)
                 image = Image.open(data.raw)
             except Exception:
-                logging.error(f'No results for tags "{self.settings.booru_tags}" on Gelbooru')
+                logging.error(f'No results for tags "{self.settings.booru_tags}" on {self.settings.booru_sites}')
                 image = Image.open(self.media)
         else:
             image = Image.open(self.media)

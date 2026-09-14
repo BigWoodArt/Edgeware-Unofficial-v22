@@ -155,7 +155,10 @@ CONFIG_ITEMS = {
     # Booru
     "booru_download": Item("downloadEnabled", BOOLEAN, BooleanVar, bool),
     "booru_tags": Item("tagList", STRING, None, lambda value: value.replace(">", " ")),
-    # "min_score": Item("booruMinScore", Schema(int), IntVar, int),  # TODO: Unimplemented
+    "booru_min_score": Item("booruMinScore", Schema(int), IntVar, int),
+    "booru_sites": Item("booruSites", STRING, None, str),  # comma-separated site class names from the booru package, e.g. "Gelbooru,Rule34"
+    "booru_api_key": Item("booruApiKey", STRING, None, str),  # Gelbooru now requires this + booru_user_id for API access
+    "booru_user_id": Item("booruUserId", STRING, None, str),
 
     # Dangerous
     "panic_lockout": Item("timerMode", BOOLEAN, BooleanVar, bool, danger=Danger(DangerLevel.MEDIUM, Schema(1), PANIC_LOCKOUT_DANGER), block=BROKEN),

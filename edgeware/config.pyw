@@ -13,7 +13,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP = "Edgeware++ Configuration"
-VERSION = "22.0.9"
+VERSION = "22.1.0"
 DO_NOT_PRESS_KEY = "_doNotPressArmed"
 HERE = Path(__file__).resolve().parent
 DATA = HERE / "data"
@@ -47,6 +47,25 @@ PRETTY_DEFAULTS = {
     "_priorityMode": "Pack Priority",
 }
 INVERTED_BOOL_KEYS = {"corruptionWallpaperCycle", "corruptionThemeCycle"}
+# Every site the "booru" package supports, minus Lolibooru - matches the same
+# list (and the same exclusion) in features/image_popup.py exactly.
+ALLOWED_BOORU_SITES = sorted({
+    "Atfbooru", "Behoimi", "Danbooru", "Derpibooru", "E621", "E926", "Furbooru",
+    "Gelbooru", "Hypnohub", "Konachan", "Konachan_Net", "Paheal", "Realbooru",
+    "Rule34", "Safebooru", "Tbib", "Xbooru", "Yandere",
+})
+# Sites actually rebuilt with the real scraper (see booru_scraper.py in src) -
+# matches that module's GELBOORU_FAMILY_DOMAINS keys exactly. Everything else
+# in ALLOWED_BOORU_SITES still uses the older JSON-API-only approach, which
+# may or may not currently work for any given one of them - shown dimmed as
+# a "not guaranteed yet" reminder, not disabled, since they might still work
+# fine and are worth testing. Paheal deliberately isn't in this set despite
+# initially being assumed to be - it turned out to run a different engine
+# entirely (Shimmie2), not the same one as the other sites here.
+GELBOORU_FAMILY_SITES = {
+    "Atfbooru", "Behoimi", "Gelbooru", "Hypnohub", "Realbooru",
+    "Rule34", "Safebooru", "Tbib", "Xbooru",
+}
 
 # Parent -> [children] for graying out settings whose parent is off/zero.
 # Two flavors: most parents are plain bools (0/1); the five in
@@ -69,6 +88,7 @@ PARENT_CHILD = {
     "fill": ["fill_delay", "drivePath", "avoidList"],
     "replace": ["replaceThresh", "drivePath", "avoidList"],
     "timerMode": ["timerSetupTime", "safeword"],
+    "downloadEnabled": ["tagList", "booruMinScore", "booruApiKey", "booruUserId", "booruSites"],
     "movingChance": ["movingSpeed"],
     "capPopChance": ["capPopTimer", "capPopOpacity", "capPopTextColor", "capPopOutlineColor"],
     "subliminalsChance": ["subliminalsAlpha"],
@@ -154,6 +174,10 @@ SECTIONS = {
     "Internet": [
         ("downloadEnabled", "Allow online image downloads", "Allows Edgeware to download images from its configured online source.", "bool", None),
         ("tagList", "Online image tags", "Words used when choosing online images.", "text", None),
+        ("booruMinScore", "Minimum score", "Skips results scoring below this. Can be negative. Not every site's scoring is equally reliable - this is best-effort, not a hard guarantee.", "signed_int", None),
+        ("booruApiKey", "Gelbooru API key", "Only used for Gelbooru specifically - it now requires this and a user ID below to search at all. Get both from a Gelbooru account's own page. Leave blank if you're not using Gelbooru.", "text", None),
+        ("booruUserId", "Gelbooru user ID", "Goes with the API key above - both are required together for Gelbooru specifically.", "text", None),
+        ("booruSites", "Sites to search", "Pick which sites to search - one is chosen at random each time an image is downloaded, using the tags above. Dimmed sites aren't rebuilt yet and may or may not currently work - still clickable if you want to try one anyway.", "booru_sites", None),
     ],
     "Modes": [
         ("lkToggle", "Low-key mode", "Keeps activity concentrated in one corner of the screen.", "bool", None),
@@ -685,6 +709,7 @@ def read_pack_overrides(pack_name):
             if typ=="bool": value=1 if truth(value) else 0
             elif typ=="pct": value=max(0,min(100,int(value)))
             elif typ in ("ms","sec","min","int"): value=max(0,int(value))
+            elif typ=="signed_int": value=int(value)
             # choice/edge_theme/corner/hibernate/text/global_key/multiline: shown as-is
         except Exception:
             continue
@@ -839,7 +864,7 @@ class App:
             b.configure(bg=self.palette["accent_dark"] if name==active else self.palette["panel"],fg=self.palette["white"] if name==active else self.palette["muted"],activebackground=self.palette["accent_dark"] if name==active else self.palette["panel3"])
 
     def raw_value(self,key,typ):
-        v=self.cfg.get(key,0 if typ in ("bool","pct","int","ms","sec","min") else "")
+        v=self.cfg.get(key,0 if typ in ("bool","pct","int","ms","sec","min","signed_int") else "")
         if typ=="bool":
             result = truth(v)
             return (not result) if key in INVERTED_BOOL_KEYS else result
@@ -916,7 +941,19 @@ class App:
             if not self.save(True): return
             win.grab_release(); win.destroy()
             self.render(self.current_section)
-            messagebox.showinfo(APP,"Armed. This takes effect the next time Edgeware starts.")
+            if "Couldn't update the Windows Startup shortcut" in self.status.get():
+                # The whole point of this feature is "this happens without you
+                # needing to check on it" - a failure here can't be allowed to
+                # hide behind a confident "Armed" dialog while the real detail
+                # sits in a status-bar note underneath it. Do Not Press is
+                # everything-but-the-startup-shortcut armed right now: Panic
+                # Lockout and the random-pack behavior are saved and will work
+                # the next time Edgeware runs manually, but it will NOT
+                # automatically start at the next Windows login until this is
+                # resolved.
+                messagebox.showwarning(APP,"Armed, but the Windows Startup shortcut could not be created:\n\n"+self.status.get().split("Couldn't update the Windows Startup shortcut: ",1)[-1].rstrip(")")+"\n\nEverything else is armed (Panic Lockout, safeword, random pack on next run) - but Edgeware will NOT automatically start at your next Windows login until this is fixed. Try running Edgeware from a folder that isn't inside OneDrive, or check that this program can write to your Startup folder.")
+            else:
+                messagebox.showinfo(APP,"Armed. This takes effect the next time Edgeware starts.")
         self.make_button(btns,"Cancel",lambda:(win.grab_release(),win.destroy())).pack(side="left",padx=6)
         tk.Button(btns,text="Arm it",command=confirm,relief="flat",bd=0,padx=16,pady=8,cursor="hand2",bg=CRIMSON,fg=self.palette["white"],activebackground=CRIMSON,activeforeground=self.palette["white"],font=("Segoe UI",11,"bold")).pack(side="left",padx=6)
 
@@ -1082,7 +1119,15 @@ class App:
             label=f"{label} ({UNIT_SUFFIX[typ]})"
         card=tk.Frame(self.page,bg=self.palette["panel2"],highlightthickness=1,highlightbackground=self.palette["border"])
         card.pack(fill="x",padx=14,pady=3)
-        left=tk.Frame(card,bg=self.palette["panel2"]); left.pack(side="left",fill="both",expand=True,padx=10,pady=7)
+        # Every other input here is compact enough to sit beside the label in
+        # a narrow right-hand column - this one is a whole grid of checkboxes
+        # and needs the full card width instead, stacked below the label
+        # rather than squeezed beside it (that squeeze is what was pushing
+        # columns off past the visible window edge).
+        full_width=typ=="booru_sites"
+        left=tk.Frame(card,bg=self.palette["panel2"])
+        if full_width: left.pack(side="top",fill="x",padx=10,pady=(7,0))
+        else: left.pack(side="left",fill="both",expand=True,padx=10,pady=7)
         left_labels=[]
         l=tk.Label(left,text=label,bg=self.palette["panel2"],fg=self.palette["white"],font=("Segoe UI",10,"bold")); l.pack(anchor="w"); left_labels.append(l)
         l=tk.Label(left,text=helptext,bg=self.palette["panel2"],fg=self.palette["muted"],font=("Segoe UI",9),wraplength=560,justify="left"); l.pack(anchor="w",pady=(1,0)); left_labels.append(l)
@@ -1094,13 +1139,16 @@ class App:
             override_value=self.pack_overrides[key]
             display_value=("ON" if truth(override_value) else "OFF") if KEY_TYPES.get(key)=="bool" else override_value
             l=tk.Label(left,text=f"Pack default for this setting is {display_value}. Pack Priority is ON.",bg=self.palette["panel2"],fg=self.palette["accent2"],font=("Segoe UI",9,"bold"),wraplength=560,justify="left"); l.pack(anchor="w",pady=(2,0)); left_labels.append(l)
-        right=tk.Frame(card,bg=self.palette["panel2"]); right.pack(side="right",padx=10,pady=7)
+        right=tk.Frame(card,bg=self.palette["panel2"])
+        if full_width: right.pack(side="top",fill="x",padx=10,pady=(4,10))
+        else: right.pack(side="right",padx=10,pady=7)
         if typ=="bool": input_setter=self.add_bool(right,key)
         elif typ in ("choice","edge_theme","corner","hibernate"): input_setter=self.add_combo(right,key,typ,choices)
         elif typ=="pack": input_setter=self.add_pack(right,key)
         elif typ=="global_key": input_setter=self.add_global_key(right,key)
         elif typ=="pct": input_setter=self.add_percent(right,key)
         elif typ=="multiline": input_setter=self.add_multiline(right,key)
+        elif typ=="booru_sites": input_setter=self.add_site_checklist(right,key)
         else: input_setter=self.add_entry(right,key,typ)
         def set_row_enabled(enabled,_labels=left_labels,_input=input_setter):
             for lbl in _labels:
@@ -1165,6 +1213,8 @@ class App:
                 value=int(str(var.get()).strip())
                 if value<0: return
                 self.cfg[key]=value
+            elif typ=="signed_int":
+                self.cfg[key]=int(str(var.get()).strip())  # negative allowed - e.g. booru score thresholds
             else:
                 self.cfg[key]=var.get()
         except (ValueError,tk.TclError):
@@ -1265,6 +1315,43 @@ class App:
             except tk.TclError: pass
             try: scale.configure(state=st)
             except tk.TclError: pass
+        return set_enabled
+
+    def add_site_checklist(self,parent,key):
+        current={x.strip() for x in str(self.cfg.get(key,"")).split(",") if x.strip()}
+        grid=tk.Frame(parent,bg=self.palette["panel2"]); grid.pack(fill="x")
+        state={"enabled":True}
+        rows=[]  # (site, label_widget, BooleanVar)
+        def sync():
+            selected=sorted(site for site,_,var in rows if var.get())
+            self.cfg[key]=",".join(selected)
+        def make_flip(site,lbl,var):
+            def flip(*_):
+                if not state["enabled"]: return
+                var.set(not var.get())
+                lbl.configure(bg=self.palette["accent_dark"] if var.get() else self.palette["panel3"])
+                sync()
+            return flip
+        cols=6  # Now spans the full card width (see add_setting) instead of a narrow column, so this comfortably fits more per row
+        for i,site in enumerate(ALLOWED_BOORU_SITES):
+            var=tk.BooleanVar(value=site in current)
+            # Sites not yet rebuilt with the real scraper get dimmed text as a
+            # "not guaranteed working yet" reminder - still fully clickable
+            # (not disabled), since they might work fine and are worth
+            # testing; only the text color differs, nothing else.
+            text_color=self.palette["white"] if site in GELBOORU_FAMILY_SITES else self.palette["dim"]
+            lbl=tk.Label(grid,text=site,width=12,bg=self.palette["accent_dark"] if var.get() else self.palette["panel3"],fg=text_color,font=("Segoe UI",8,"bold"),cursor="hand2")
+            lbl.grid(row=i//cols,column=i%cols,padx=2,pady=2,sticky="w")
+            lbl.bind("<Button-1>",make_flip(site,lbl,var))
+            rows.append((site,lbl,var))
+        # Not a normal Variable-backed setting (no single Variable represents
+        # "which sites are checked") - self.cfg is kept current directly by
+        # sync() above on every click instead, same reasoning as add_multiline.
+        self.vars[key]=(None,"booru_sites")
+        def set_enabled(enabled):
+            state["enabled"]=enabled
+            for _,lbl,_ in rows:
+                lbl.configure(cursor="hand2" if enabled else "arrow")
         return set_enabled
 
     def add_multiline(self,parent,key):
@@ -1375,6 +1462,7 @@ class App:
                 self.cfg[key] = (1 - value) if key in INVERTED_BOOL_KEYS else value
             elif typ=="pct": self.cfg[key]=max(0,min(100,int(var.get())))
             elif typ=="multiline": pass  # Already kept current in self.cfg directly - see add_multiline
+            elif typ=="booru_sites": pass  # Already kept current in self.cfg directly - see add_site_checklist
             elif typ=="pack": self.cfg[key]=self.pack_map.get(var.get())
             elif typ=="corner": self.cfg[key]={"Top-Left":0,"Top-Right":1,"Bottom-Left":2,"Bottom-Right":3}.get(var.get(),0)
             elif typ=="global_key": self.cfg[key]=var.get()
@@ -1382,6 +1470,7 @@ class App:
                 value=int(str(var.get()).strip())
                 if value<0: raise ValueError(f"{key} cannot be negative.")
                 self.cfg[key]=value
+            elif typ=="signed_int": self.cfg[key]=int(str(var.get()).strip())
             elif typ=="edge_theme": self.cfg[key]=var.get()
             else: self.cfg[key]=var.get()
         self.cfg["_prettyConfigTheme"]=self.theme_name

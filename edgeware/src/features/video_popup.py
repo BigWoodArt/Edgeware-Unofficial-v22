@@ -64,11 +64,31 @@ class VideoPopup(Popup):
         super().__init__(self._pending_root, self._pending_settings, self._pending_pack, self._pending_state, self._pending_on_close)
 
         self.compute_geometry(properties["width"], properties["height"])
+        # compute_geometry() just set the window to its real final size and
+        # position - but mpv (running in a separate subprocess in the
+        # default mode) needs a moment to actually start rendering into it,
+        # and showing a full-size blank window for that whole gap is what
+        # caused a visible appear-then-disappear flash before every video.
+        # Tuck it into a screen corner immediately instead, so if there IS
+        # a blank moment, it's a couple of pixels, not a noticeable
+        # rectangle - then reveal the real spot shortly after, by which
+        # point the video should already be playing. This is a fixed-delay
+        # guess, not a real "mpv is ready" signal (nothing currently
+        # reports that back from the subprocess) - if movingChance is also
+        # active on this popup, its own first movement tick may reveal the
+        # real position slightly earlier than this timer does, which is a
+        # harmless, strictly-better-than-before edge case, not a bug.
+        real_geometry = f"{self.width}x{self.height}+{self.x}+{self.y}"
+        corner_x = self.monitor.x + self.monitor.width - 2
+        corner_y = self.monitor.y + self.monitor.height - 2
+        self.geometry(f"2x2+{corner_x}+{corner_y}")
 
         self.player = VideoPlayer(self, self.settings, self.width, self.height)
         self.player.properties["volume"] = self.settings.video_volume
         self.player.properties["glsl-shaders"] = self.try_denial_filter(True)
         self.player.play(self.media)
+
+        self.after(350, lambda: self.geometry(real_geometry))
 
         self.init_finish()
 

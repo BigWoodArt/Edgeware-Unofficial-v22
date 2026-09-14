@@ -680,3 +680,133 @@ staging attribute name, which collided with Tkinter's own internal
 etc. before shipping.
 
 Version bumped to v22.0.9.
+
+## 25. v22.0.11 - booru download expansion, packaged together with the v22.0.9 video-popup-freeze fix above
+
+Neither this nor the v22.0.9 fix above had actually been packaged into a
+release yet, so both ship together here under one version bump.
+
+**Revived `booruMinScore`.** It already existed in `default_config.json`
+(-5) and even in the pack file you showed me earlier, but the actual
+`Item` was commented out with `# TODO: Unimplemented` - it did nothing at
+all. Un-commented it (`Schema(int)`, not `NONNEGATIVE` - scores are
+legitimately negative) and wired it into the actual download logic.
+
+**Expanded from a hardcoded single site to ~18, checkbox-style.** The old
+code always used `booru.Gelbooru()`, hardcoded, with the original authors'
+own `# TODO: Better booru integration` comment sitting right above it. The
+`booru` package Edgeware already depends on supports about 20 sites behind
+an identical interface, so this was a real, low-risk expansion rather than
+new integration work. New `booru_sites` setting (comma-separated site
+names) replaces the hardcoded site; `config.pyw` renders it as a compact
+grid of per-site checkboxes rather than 18 separate full setting rows.
+Whichever sites are checked, one is picked at random each time a download
+triggers, searched with the existing shared tag list. Defaults to
+`"Gelbooru"` alone, so existing installs keep behaving exactly like before
+until this is changed.
+
+**Lolibooru is deliberately not included**, in the site list or anywhere
+else, regardless of what a pack's own config.json might specify - the
+runtime code re-checks every requested site name against an explicit
+allow-list before ever instantiating one, so this can't be re-enabled via
+a pack override either.
+
+**Score filtering is best-effort, stated plainly rather than oversold.**
+Not every one of these ~18 sites necessarily exposes score data in exactly
+the same shape - a result missing score info is kept rather than dropped;
+only ones with an explicit score below the threshold are filtered out.
+
+Switched from `search_image()` (image URLs only) to `search()` (full post
+metadata, needed to read score) and added the same defensive `file_url` /
+nested `file.url` extraction fallback the `booru` package's own code uses
+internally, since a couple of sites (Derpibooru/Furbooru-style) shape that
+field differently.
+
+Verified directly: Lolibooru is refused even when explicitly requested;
+unrecognized/garbage site names are ignored rather than crashing; score
+filtering correctly skips low-scoring results while keeping ones missing
+score data; the nested `file.url` fallback extraction works; the
+checkbox grid correctly accumulates multiple selections and removes just
+the one unchecked, independent of the others; negative values save
+correctly for the score threshold; and the whole "Allow online image
+downloads" group grays out correctly when that master switch is off, the
+same as every other dependent-setting group.
+
+Version bumped to v22.0.11.
+
+## 26. v22.1.0 - real Gelbooru-family scraper, startup-shortcut silent-failure fix, checklist layout/coloring, video corner-reveal
+
+Five items, batched together as agreed.
+
+**1) Booru download: real scraper for the Gelbooru-engine family, not just
+a config tweak.** The third-party `booru` package only ever speaks each
+site's JSON API - and per your research notes, that's exactly what's
+broken: Gelbooru now requires an api_key + user_id the old code never
+sent (401 without them - now fixed, two new settings), and RealBooru's
+own API is reported dead server-side, no client-side fix possible there.
+New `features/booru_scraper.py`: JSON API first, falls back to scraping
+the ordinary search-listing HTML page when the API is unavailable or
+returns something unusable (not just on a non-200 status - a 200 with an
+HTML error page or dead-API response inside counts too), resolves real
+full-resolution images via each post's own page rather than guessing from
+the thumbnail URL (trying "Original image" first, correctly skipping the
+Gelbooru "original"-tag sidebar-link trap your notes flagged, then
+og:image, then the inline #image tag as a last resort), real User-Agent
+header, rate-limited to ~1 req/sec, yields results as found rather than
+resolving a whole batch before returning anything. Covers Gelbooru,
+RealBooru, Hypnohub, Rule34, Safebooru, Xbooru, Tbib, Atfbooru, Behoimi -
+sites confirmed or well-established to run this exact engine with the
+same URL scheme. Score filtering only applies on the JSON API path - the
+HTML fallback has no reliable score signal at all, so that's accepted and
+documented rather than faked. Verified with 6 tests against synthetic
+HTML/JSON matching the documented markup, including the "original" tag
+trap specifically and both fallback tiers.
+
+**Correction from earlier in this thread:** Paheal was originally assumed
+to be part of this family. It isn't - it runs a different engine
+(Shimmie2) with its own URL scheme entirely, so it's excluded from the
+scraper and stays on the older mechanism like the other 8 not-yet-covered
+sites.
+
+**2) The other 3 site families, dimmed as a reminder, not locked.**
+Danbooru/Konachan/Konachan_Net/Yandere, Derpibooru/Furbooru, E621/E926,
+plus Paheal per the correction above - 9 sites total, shown with dim text
+in the checklist. Fully clickable, not disabled - they might work fine on
+the older mechanism, this is a "not guaranteed yet" flag, not a lockout.
+
+**3) `make_shortcut()`'s silent-failure bug, actually fixed.** It now
+verifies the `.lnk` file actually exists after attempting creation and
+raises a real, detailed OSError if not (previously: no way for this to
+ever become a catchable Python exception at all). This flows through to
+the error-reporting `apply_startup_toggle()` already had. Also fixed a
+real gap in the Do Not Press arm flow specifically: it was calling
+save(quiet=True) and then showing an unconditional "Armed!" dialog
+regardless of whether the startup shortcut actually got created - a
+failure there was only ever visible in a quiet status-bar note sitting
+underneath that confident popup. Now checks for that failure and shows a
+clear warning instead, explicitly stating that Panic Lockout and the
+random-pack behavior ARE armed but the automatic-start-at-login part is
+not, rather than let a partial failure hide behind full success. Verified
+the core detection logic directly (isolated test: file missing → raises
+with the actual VBS output attached; file present → no raise) - the full
+module can't be imported on this dev platform at all (ctypes.windll is
+Windows-only), so this is the most verification possible without a live
+Windows test.
+
+**4) Site checklist layout fixed.** Was squeezed into the same narrow
+right-hand column every other (much smaller) setting type uses, which is
+what was pushing columns off past the visible window edge. Now spans the
+full card width, stacked below the label instead of beside it, and bumped
+to 6 columns to use the extra room.
+
+**5) Video popup corner-flash fixed.** Snaps to a 2x2 pixel spot in the
+monitor's bottom-right corner immediately after creation, starts the
+video exactly as before, then reveals the real size/position after a
+350ms delay - a fixed-delay guess, not a real "mpv is ready" signal
+(nothing reports that back from the mpv subprocess currently), but it
+turns a full-size blank-window flash into, at worst, a barely-visible
+corner flicker. Verified directly: window measured at the tiny corner
+geometry before the delay, real computed geometry after it, zero errors.
+
+Version bumped to v22.1.0 (a real feature addition, not a patch-level
+fix, hence the minor version bump rather than another patch increment).
