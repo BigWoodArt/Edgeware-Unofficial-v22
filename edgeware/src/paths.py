@@ -53,6 +53,35 @@ class Assets:
     DEFAULT_STARTUP_SPLASH = ROOT / "default_loading_splash.png"
     DEFAULT_THEME_DEMO = ROOT / "default_theme_demo.png"
 
+    # Bundled full-screen spiral overlay options (see features/spiral_overlay.py).
+    # Not a pack asset - these are Edgeware's own, picked in config.pyw's
+    # spiralOverlayAsset setting. All originally generated (procedural, no
+    # external source) specifically to avoid any licensing ambiguity.
+    SPIRALS_ROOT = ROOT / "spirals"
+    SPIRAL_CLASSIC = SPIRALS_ROOT / "classic.gif"
+    SPIRAL_TWO_ARM_TAPER = SPIRALS_ROOT / "two_arm_taper.gif"
+    SPIRAL_ONE_ARM_TAPER = SPIRALS_ROOT / "one_arm_taper.gif"
+
+    # Bundled binaural beat variations (see features/binaural_overlay.py) -
+    # 10 pre-generated loops, 200Hz carrier, beat frequency stepped 4-12Hz.
+    # Synthesized (pure sine tones), not sourced from anywhere, same
+    # reasoning as the spirals above. Rides the same spiralOverlayEnabled
+    # toggle - see that module's docstring for why there's deliberately no
+    # separate on/off switch for this.
+    BINAURAL_ROOT = ROOT / "binaural"
+    BINAURAL_VARIATIONS = [
+        BINAURAL_ROOT / "binaural_00_4.0hz.ogg",
+        BINAURAL_ROOT / "binaural_01_4.9hz.ogg",
+        BINAURAL_ROOT / "binaural_02_5.8hz.ogg",
+        BINAURAL_ROOT / "binaural_03_6.7hz.ogg",
+        BINAURAL_ROOT / "binaural_04_7.6hz.ogg",
+        BINAURAL_ROOT / "binaural_05_8.4hz.ogg",
+        BINAURAL_ROOT / "binaural_06_9.3hz.ogg",
+        BINAURAL_ROOT / "binaural_07_10.2hz.ogg",
+        BINAURAL_ROOT / "binaural_08_11.1hz.ogg",
+        BINAURAL_ROOT / "binaural_09_12.0hz.ogg",
+    ]
+
     # Denial mode mpv shaders
     SHADERS = ROOT / "shaders"
     SHADER_GAUSSIAN_BLUR = SHADERS / "gaussian_blur.glsl"

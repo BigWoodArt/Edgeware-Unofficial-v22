@@ -125,12 +125,25 @@ class Pack:
         return random.randint(1, self.find_media_mood(media).max_clicks)
 
     def random_subliminal(self) -> str | None:
+        # Deliberately does NOT fall back to captions when the subliminals
+        # pool is empty for the currently active moods - a pack legitimately
+        # leaving subliminals empty at an early corruption level (letting it
+        # only kick in at a later level) means "show nothing here," not
+        # "show a caption instead." A caption substituting in was reported
+        # directly: noticeably longer text than the intended one-word
+        # subliminal messages, showing up exactly where the pack expected
+        # silence.
         subliminals = self.find_list("subliminals")
-        return random.choice(subliminals) if subliminals else self.random_caption()
+        return random.choice(subliminals) if subliminals else None
 
     def random_notification(self) -> str | None:
+        # Same reasoning as random_subliminal() above - notifications,
+        # subliminals, and captions are three distinct pools serving
+        # different roles, and a pack leaving one empty is a deliberate
+        # "show nothing here," not an invitation to substitute a different
+        # pool's content.
         notifications = self.find_list("notifications")
-        return random.choice(notifications) if notifications else self.random_caption()
+        return random.choice(notifications) if notifications else None
 
     def random_denial(self) -> str:
         return random.choice(self.find_list("denial") or ["Not for you~"])

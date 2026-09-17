@@ -103,7 +103,7 @@ class ConfigWindow(Tk):
         notebook.add(general_tab, text="General")
         general_notebook = ttk.Notebook(general_tab)
         general_notebook.pack(expand=1, fill="both")
-        general_notebook.add(StartTab(vars, local_version, live_version, pack), text="Start")  # startup screen, info and presets
+        general_notebook.add(StartTab(vars, local_version, live_version or "Could not check version.", pack), text="Start")  # startup screen, info and presets
         general_notebook.add(InfoTab(pack), text="Pack Info")  # pack information
         general_notebook.add(DefaultFileTab(), text="Change Default Files")  # tab for changing default files
         general_notebook.add(SchedulingTab(vars), text="Scheduling")  # tab for scheduling edgeware to run in the future
@@ -184,7 +184,10 @@ class ConfigWindow(Tk):
         # version alert, if core web version (0.0.0) is different from the github configdefault, alerts user that update is available
         #   if user is a bugfix patch behind, the _X at the end of the 0.0.0, they will not be alerted
         #   the version will still be red to draw attention to it
-        if local_version.split("_")[0] != live_version.split("_")[0] and not (local_version.endswith("DEV") or config["toggleInternet"]):
+        # live_version is None if the check was disabled (toggleInternet) or failed (offline/blocked/etc) -
+        # only nag on a genuine, successfully-fetched mismatch, never on "couldn't check" (that used to
+        # read as a false "update available" every time this failed to reach GitHub).
+        if live_version and local_version.split("_")[0] != live_version.split("_")[0] and not local_version.endswith("DEV"):
             messagebox.showwarning(
                 "Update Available",
                 'Main local version and web version are not the same.\nPlease visit the Github and download the newer files,\nor use the direct download link on the "Start" tab.',

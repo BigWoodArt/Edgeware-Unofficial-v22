@@ -57,6 +57,10 @@ def compute_mood_id(paths: PackPaths) -> str:
     return md5(str(sorted(data)).encode()).hexdigest()
 
 
+def enabled_monitors(settings: Settings) -> list[Monitor]:
+    return [m for m in get_monitors() if m.name not in settings.disabled_monitors]
+
+
 def primary_monitor() -> Monitor | None:
     monitors = get_monitors()
 
@@ -65,5 +69,4 @@ def primary_monitor() -> Monitor | None:
 
 
 def random_monitor(settings: Settings) -> Monitor:
-    enabled_monitors = [m for m in get_monitors() if m.name not in settings.disabled_monitors]
-    return random.choice(enabled_monitors or primary_monitor())
+    return random.choice(enabled_monitors(settings) or [primary_monitor()])

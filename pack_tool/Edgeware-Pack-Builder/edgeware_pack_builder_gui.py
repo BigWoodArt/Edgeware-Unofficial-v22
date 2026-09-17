@@ -64,7 +64,7 @@ except ImportError:
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 BANNER_PATH = SCRIPT_DIR / "banner.png"
-TOOL_VERSION = "0.8"
+TOOL_VERSION = "0.11"
 SETTINGS_PATH = SCRIPT_DIR / "builder_settings.json"
 
 # ---------------------------------------------------------------------------
@@ -300,8 +300,11 @@ ADVANCED_FIELD_GROUPS = [
          "How often a subliminal caption (one of this mood's 'Subliminal messages') flashes on screen. Leave empty to keep it the same as before. This is separate from the hypno overlay picture above - Edgeware has two different features that both use the word 'subliminal', and this is the one for the flashed TEXT."),
         ("capPopOpacity", "Subliminal text opacity (%)",
          "How visible the subliminal caption text is when it flashes. Higher means easier to read. Leave empty to keep it the same as before."),
-        ("capPopTimer", "Subliminal text duration (sec)",
-         "How many seconds a subliminal caption stays on screen before disappearing. Leave empty to keep it the same as before."),
+        ("capPopTimer", "Subliminal text duration (ms)",
+         "How many MILLISECONDS a subliminal caption stays on screen before disappearing (1000 = one second). "
+         "Edgeware++ uses this value raw, unlike almost every other duration field in the pack - it does NOT "
+         "convert from seconds. Edgeware's own shipped default is 300 (a quick flash). Leave empty to keep it "
+         "the same as before."),
         ("denialChance", "Denial message chance (%)",
          "How often a special 'not yet!' message shows up. Leave empty to keep it the same as before."),
         ("movingChance", "Moving popup chance (%)",
@@ -617,7 +620,7 @@ PRESETS = {
         "denialChance": (0, 0, "linear"),
         "capPopChance": (0, 15, "exp"),
         "capPopOpacity": (50, 65, "exp"),
-        "capPopTimer": (3, 1, "exp"),
+        "capPopTimer": (3000, 1000, "exp"),
         "notificationChance": (5, 10, "exp"),
         "notificationImageChance": (20, 35, "exp"),
         "maxAudio": (1, 2, "exp"),
@@ -641,7 +644,7 @@ PRESETS = {
         "denialChance": (0, 0, "linear"),
         "capPopChance": (10, 35, "exp"),
         "capPopOpacity": (60, 75, "exp"),
-        "capPopTimer": (3, 1, "exp"),
+        "capPopTimer": (3000, 1000, "exp"),
         "notificationChance": (10, 20, "exp"),
         "notificationImageChance": (40, 55, "exp"),
         "maxAudio": (1, 2, "exp"),
@@ -665,7 +668,7 @@ PRESETS = {
         "denialChance": (0, 0, "linear"),
         "capPopChance": (30, 60, "exp"),
         "capPopOpacity": (75, 90, "exp"),
-        "capPopTimer": (2, 1, "exp"),
+        "capPopTimer": (2000, 1000, "exp"),
         "notificationChance": (15, 35, "exp"),
         "notificationImageChance": (60, 75, "exp"),
         "maxAudio": (2, 3, "exp"),
@@ -689,7 +692,7 @@ PRESETS = {
         "denialChance": (0, 0, "linear"),
         "capPopChance": (60, 90, "exp"),
         "capPopOpacity": (90, 100, "exp"),
-        "capPopTimer": (2, 1, "exp"),
+        "capPopTimer": (2000, 1000, "exp"),
         "notificationChance": (20, 50, "exp"),
         "notificationImageChance": (80, 95, "exp"),
         "maxAudio": (3, 5, "exp"),
@@ -755,6 +758,8 @@ def build_pack_yml_dict(plan: PackPlan) -> dict:
             entry["web"] = mc["web_entries"]
         mood_entries.append(entry)
 
+    corruption_levels = build_corruption_levels(plan)
+
     base_raw = {
         "corruptionMode": plan.pack_corruption_mode,
         "corruptionTrigger": "Timed" if plan.cycle_mode == "timer" else "Popup",
@@ -772,6 +777,21 @@ def build_pack_yml_dict(plan: PackPlan) -> dict:
     }
     if plan.pack_mitosis_mode:
         base_raw["mitosisStrength"] = plan.pack_mitosis_strength
+
+    # Level 1 applies the instant the pack starts, before the first popup -
+    # but only if corruptionFullPerm is actually on in the user's LIVE
+    # settings, which the pack itself can't turn on (see the long-running
+    # corruptionFullPerm notes elsewhere in this file). config.json is the
+    # one thing that CAN reach the user directly (via config.pyw's "Load
+    # Pack Configuration"), so folding Level 1's own config values in here
+    # too means: if corruptionFullPerm happens to be off, or someone's
+    # troubleshooting and wants to see every setting the pack will apply
+    # before the first popup even fires, config.json actually reflects
+    # that starting state - not just the pack-wide meta settings above.
+    # Harmless when corruptionFullPerm IS on: Level 1 overwrites these same
+    # keys with these same values the instant the pack starts anyway.
+    if corruption_levels:
+        base_raw.update(corruption_levels[0].get("config", {}))
 
     return {
         "info": {
@@ -797,7 +817,7 @@ def build_pack_yml_dict(plan: PackPlan) -> dict:
         },
         "corruption": {
             "generate": True,
-            "levels": build_corruption_levels(plan),
+            "levels": corruption_levels,
         },
     }
 
@@ -852,6 +872,42 @@ def _unique_copy(src: Path, dst_dir: Path):
             dst = dst_dir / f"{stem}_{i}{suffix}"
             i += 1
     shutil.copy2(src, dst)
+
+
+def sanitized_plan_json(plan) -> str:
+    """plan.json normally carries the builder's own absolute local file
+    paths (media_files, wallpaper_path, default_wallpaper_path,
+    loading_splash_path, hypno_paths, source_dir, pack_tool_dir) - fine
+    for the person who built the pack, but plan.json ships INSIDE the
+    zip, so anyone who receives that pack and opens it (or just unzips
+    it out of curiosity) sees the builder's Windows username and folder
+    structure. None of that is actually needed for anyone else to
+    reload the pack, either - the real files are already sitting right
+    there in the compiled pack's own bundled media, matched by filename
+    (see load_plan_json). So the shipped copy only keeps bare filenames
+    for every path, and blanks the two purely-local settings entirely.
+    """
+    def basename_any_sep(p_str):
+        # Same reasoning as load_plan_json's copy of this: Path(...).name
+        # only splits on backslash when actually running on Windows, and
+        # this needs to work on whatever OS the BUILDER is running, not
+        # assume it matches the string's own separator style.
+        return p_str.replace("\\", "/").rsplit("/", 1)[-1] if p_str else p_str
+
+    data = asdict(plan)
+    data["source_dir"] = ""
+    data["pack_tool_dir"] = ""
+    data["loaded_from_zip_dir"] = ""
+    data["hypno_paths"] = [basename_any_sep(p) for p in data.get("hypno_paths") or []]
+    data["default_wallpaper_path"] = basename_any_sep(data.get("default_wallpaper_path", ""))
+    data["loading_splash_path"] = basename_any_sep(data.get("loading_splash_path", ""))
+    for mc in data.get("mood_configs", {}).values():
+        if isinstance(mc, dict):
+            if mc.get("media_files"):
+                mc["media_files"] = [basename_any_sep(p) for p in mc["media_files"]]
+            if mc.get("wallpaper_path"):
+                mc["wallpaper_path"] = basename_any_sep(mc["wallpaper_path"])
+    return json.dumps(data, indent=2)
 
 
 def write_pack_source(plan: PackPlan, output_dir: Path, status_cb=None) -> None:
@@ -951,7 +1007,7 @@ def write_pack_source(plan: PackPlan, output_dir: Path, status_cb=None) -> None:
     status("Writing pack.yml...")
     doc = build_pack_yml_dict(plan)
     (output_dir / "pack.yml").write_text(_dump_yaml(doc), encoding="utf-8")
-    (output_dir / "plan.json").write_text(plan.to_json(), encoding="utf-8")
+    (output_dir / "plan.json").write_text(sanitized_plan_json(plan), encoding="utf-8")
 
 
 def zip_directory(src_dir: Path, dest_zip: Path, status_cb=None) -> None:
@@ -1072,14 +1128,14 @@ def load_plan_json(path: Path) -> tuple:
         # machines), so this can't rely on the host OS's path semantics.
         return p_str.replace("\\", "/").rsplit("/", 1)[-1]
 
-    def find_by_name(filename):
-        for subfolder in ("img", "aud", "vid"):
+    def find_by_name(filename, subfolders):
+        for subfolder in subfolders:
             candidate = base / subfolder / filename
             if candidate.is_file():
                 return candidate
         return None
 
-    def resolve(p_str, label):
+    def resolve(p_str, label, subfolders=("img", "aud", "vid")):
         p = Path(p_str)
 
         if p.is_absolute() and p.is_file():
@@ -1090,7 +1146,7 @@ def load_plan_json(path: Path) -> tuple:
             if candidate.is_file():
                 return str(candidate)
 
-        by_name = find_by_name(basename_any_sep(p_str))
+        by_name = find_by_name(basename_any_sep(p_str), subfolders)
         if by_name is not None:
             return str(by_name)
 
@@ -1100,14 +1156,71 @@ def load_plan_json(path: Path) -> tuple:
                          f"either. You'll need to re-add this file on the Media Review page.")
         return p_str
 
+    def resolve_splash(p_str, label):
+        # The compiled pack names this "loading_splash.<ext>" at the pack
+        # root (extension varies) - matched by glob rather than an exact
+        # filename, since the recorded extension might not be the real one.
+        p = Path(p_str)
+        if p.is_absolute() and p.is_file():
+            return p_str
+        if not p.is_absolute():
+            candidate = (base / p).resolve()
+            if candidate.is_file():
+                return str(candidate)
+        matches = list(base.glob("loading_splash.*"))
+        if matches:
+            return str(matches[0])
+        warnings.append(f"{label}: '{p_str}' couldn't be found, and no loading_splash.* "
+                         f"file exists in the pack's own folder either.")
+        return p_str
+
+    # A mood built from a whole-folder scan (the common case, not just an
+    # explicit file-by-file list) never had its own media_files recorded in
+    # plan.json at all - nothing to resolve above, and normally nothing to
+    # rebuild from either once source_dir is gone (blanked for anyone but
+    # the original builder). index.json, if it's sitting right there next
+    # to plan.json, already knows exactly which bundled files belong to
+    # which mood - reuse that as the fallback so a pack still rebuilds
+    # cleanly after being moved, not just previewable.
+    index_media_by_mood = {}
+    index_json_path = base / "index.json"
+    if index_json_path.is_file():
+        try:
+            index_data = json.loads(index_json_path.read_text(encoding="utf-8"))
+            for mood_entry in index_data.get("moods", []):
+                name = mood_entry.get("mood")
+                if name:
+                    index_media_by_mood[name] = mood_entry.get("media", [])
+        except Exception:
+            pass  # no index.json, or not in the expected shape - just skip this fallback
+
     for mood_name, mc in plan.mood_configs.items():
         if isinstance(mc, dict):
             media_files = mc.get("media_files") or []
             if media_files:
                 mc["media_files"] = [resolve(p, f"'{mood_name}' media") for p in media_files]
+            elif mood_name in index_media_by_mood:
+                rebuilt = []
+                for filename in index_media_by_mood[mood_name]:
+                    found = find_by_name(filename, ("img", "aud", "vid"))
+                    if found is not None:
+                        rebuilt.append(str(found))
+                    else:
+                        warnings.append(f"'{mood_name}' media: '{filename}' is listed in index.json "
+                                         f"but isn't in the pack's own bundled media - it may have been "
+                                         f"removed from the pack at some point.")
+                mc["media_files"] = rebuilt
             wp = mc.get("wallpaper_path")
             if wp:
-                mc["wallpaper_path"] = resolve(wp, f"'{mood_name}' wallpaper")
+                mc["wallpaper_path"] = resolve(wp, f"'{mood_name}' wallpaper", subfolders=("", "wallpapers"))
+
+    if plan.default_wallpaper_path:
+        plan.default_wallpaper_path = resolve(plan.default_wallpaper_path, "Default wallpaper",
+                                               subfolders=("", "wallpapers"))
+    if plan.loading_splash_path:
+        plan.loading_splash_path = resolve_splash(plan.loading_splash_path, "Loading splash image")
+    if plan.hypno_paths:
+        plan.hypno_paths = [resolve(p, "Hypno overlay image", subfolders=("hypno",)) for p in plan.hypno_paths]
 
     return plan, warnings
 
@@ -1517,6 +1630,15 @@ class PackBuilderApp:
         self.load_status_var.set(message)
 
     def _stop_loading(self):
+        # Guard against the page having been rebuilt out from under this -
+        # e.g. Page 1 got reloaded/rebuilt while a folder scan or zip
+        # extraction from a PREVIOUS visit to this page was still running in
+        # the background. self.load_progress would then point at an already-
+        # destroyed widget, and touching it raises TclError: invalid command
+        # name (same underlying issue as the Media Review page's thumbnail
+        # loading - see the notes there).
+        if not self.load_progress.winfo_exists():
+            return
         self.load_progress.stop()
         self.load_progress.pack_forget()
         self.load_status_label.pack_forget()
@@ -1543,6 +1665,12 @@ class PackBuilderApp:
     def _poll_folder_scan(self, result):
         if result["names"] is None and result["error"] is None:
             self.root.after(100, self._poll_folder_scan, result)
+            return
+
+        # Page 1 may have been rebuilt (e.g. the user loaded a different
+        # pack) while this scan was still running - every widget below
+        # belongs to that now-gone page, so there's nothing safe left to do.
+        if not self.load_progress.winfo_exists():
             return
 
         self._stop_loading()
@@ -1622,6 +1750,11 @@ class PackBuilderApp:
     def _poll_zip_extract(self, result):
         if result["extract_dir"] is None and result["error"] is None:
             self.root.after(100, self._poll_zip_extract, result)
+            return
+
+        # Same guard as _poll_folder_scan - Page 1 may have been rebuilt
+        # while this extraction was still running.
+        if not self.load_progress.winfo_exists():
             return
 
         self._stop_loading()
@@ -1708,6 +1841,28 @@ class PackBuilderApp:
 
         if self.plan.pack_tool_dir:
             self.pack_tool_var.set(self.plan.pack_tool_dir)
+        else:
+            # plan.json deliberately never carries pack_tool_dir anymore (a
+            # purely local setting, stripped for privacy before shipping -
+            # see sanitized_plan_json), so EVERY loaded pack reaches this
+            # branch. Used to just leave the display alone here, which kept
+            # showing whatever it said BEFORE the load - looking correct on
+            # Page 1 while the actual value used at build time was blank
+            # underneath it, only surfacing as "Pack tool not found" at
+            # build time. Re-run the same auto-detect/remembered-setting
+            # check __init__ does instead of leaving it stale or blank.
+            auto = find_pack_tool_dir()
+            if auto:
+                self.plan.pack_tool_dir = auto
+                self.pack_tool_var.set(auto)
+                self.pack_tool_note_var.set("(auto-detected)")
+            elif self.settings.get("pack_tool_dir") and (Path(self.settings["pack_tool_dir"]) / "src" / "main.py").is_file():
+                self.plan.pack_tool_dir = self.settings["pack_tool_dir"]
+                self.pack_tool_var.set(self.plan.pack_tool_dir)
+                self.pack_tool_note_var.set("(remembered from last time)")
+            else:
+                self.pack_tool_var.set("Not set (you'll compile manually)")
+                self.pack_tool_note_var.set("")
 
     # -- Step 2: whole-experience settings ---------------------------------
 
@@ -2258,8 +2413,7 @@ class PackBuilderApp:
         videos_frame = self._make_collapsible(card, "Videos")
         vid_grid = ttk.Frame(videos_frame)
 
-        audio_frame = ttk.LabelFrame(card, text="Audio", padding=8)
-        audio_frame.pack(fill="x", pady=(0, 8))
+        audio_frame = self._make_collapsible(card, "Audio")
         audio_list = ttk.Frame(audio_frame)
         audio_list.pack(fill="x")
 
@@ -2398,6 +2552,16 @@ class PackBuilderApp:
             threading.Thread(target=worker, daemon=True).start()
 
             def poll():
+                # The whole page (or the whole app, e.g. loading a different
+                # zip mid-flight) can get torn down while this background
+                # thread is still working - card.winfo_exists() is False
+                # once that's happened, and touching any of this mood's
+                # widgets afterward (img_progress.stop() in particular) was
+                # raising TclError: invalid command name, since the actual
+                # Tk widget behind it no longer exists. Bail out quietly
+                # instead - there's nothing meaningful left to update.
+                if not card.winfo_exists():
+                    return
                 if result["images"] is None:
                     self.root.after(80, poll)
                     return
@@ -3058,6 +3222,12 @@ class PackBuilderApp:
     def _poll_build(self, out_dir):
         if not self._build_result.get("done"):
             self.root.after(150, self._poll_build, out_dir)
+            return
+
+        # Same guard as the loading/thumbnail polling loops elsewhere - the
+        # Per-Mood page (where these widgets live) could have been torn
+        # down while a build was still running in the background.
+        if not self.progress.winfo_exists():
             return
 
         self.progress.stop()

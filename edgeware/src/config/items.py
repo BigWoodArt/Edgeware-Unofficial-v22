@@ -135,6 +135,8 @@ CONFIG_ITEMS = {
     "captions_in_popups": Item("showCaptions", BOOLEAN, BooleanVar, bool),
     "hypno_chance": Item("subliminalsChance", PERCENTAGE, IntVar, int),
     "hypno_opacity": Item("subliminalsAlpha", PERCENTAGE, IntVar, to_float),
+    "spiral_overlay_enabled": Item("spiralOverlayEnabled", BOOLEAN, BooleanVar, bool),
+    "spiral_overlay_asset": Item("spiralOverlayAsset", Schema(Union("Classic", "Two-Arm Taper", "One-Arm Taper", "Pack's Own")), StringVar, str),
     "denial_chance": Item("denialChance", PERCENTAGE, IntVar, int),
     "buttonless": Item("buttonless", BOOLEAN, BooleanVar, bool),
     "multi_click_popups": Item("multiClick", BOOLEAN, BooleanVar, bool),
@@ -201,6 +203,7 @@ CONFIG_ITEMS = {
     "corruption_dev_mode": Item("corruptionDevMode", BOOLEAN, BooleanVar, bool, block=True),
 
     # Troubleshooting
+    "image_resize_filter": Item("imageResizeFilter", Schema(Union("Bilinear", "Bicubic", "Lanczos")), StringVar, str),
     "toggle_hibernate_skip": Item("toggleHibSkip", BOOLEAN, BooleanVar, bool, block=True),
     "toggle_mood_set": Item("toggleMoodSet", BOOLEAN, BooleanVar, None, block=True),
     "toggle_internet": Item("toggleInternet", BOOLEAN, BooleanVar, None, block=True),

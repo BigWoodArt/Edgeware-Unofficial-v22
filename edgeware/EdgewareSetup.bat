@@ -34,6 +34,21 @@ if not %errorlevel%==0 (
   )
 )
 
+:: Checked via Python's own sys.version_info tuple comparison rather than
+:: parsing "Python X.Y.Z" text out of "py --version" - comparing a tuple of
+:: ints is exact, where string-parsing version numbers in batch is fragile
+:: (e.g. breaks across two-vs-three-digit minor versions).
+py -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)"
+if not %errorlevel%==0 (
+  echo:
+  echo ============================================================
+  echo  WARNING: Your Python version is older than 3.12.
+  echo  Edgeware++ may not work correctly on this version.
+  echo ============================================================
+  echo:
+  powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('Your installed Python version is older than 3.12, which Edgeware++ may not work correctly on. You can continue anyway, but if you run into problems, consider uninstalling your current Python version and running this installer again to get a supported one.', 'Edgeware++ Setup - Python Version Warning', 'OK', 'Warning')"
+)
+
 echo pip version:
 py -m pip --version
 if not %errorlevel%==0 (
@@ -53,6 +68,7 @@ echo Installing requirements...
 py -m pip install -r requirements.txt
 if not %errorlevel%==0 (
   echo Failed to install requirements.
+  powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('Installing Edgeware++''s required Python packages failed. Check the command window for the actual pip error above, then try running this installer again.', 'Edgeware++ Setup - Install Failed', 'OK', 'Error')"
   pause
   exit
 )
@@ -69,6 +85,7 @@ if not exist data\libmpv-2.dll (
 
   if not exist data\libmpv-2.dll (
     echo Failed to install libmpv.
+    powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('Downloading or extracting libmpv (needed for video/audio playback) failed. Check the command window above for details, then try running this installer again.', 'Edgeware++ Setup - Install Failed', 'OK', 'Error')"
     pause
     exit
   )

@@ -53,6 +53,7 @@ import logging
 import random
 from threading import Thread
 from tkinter import Tk
+from typing import Callable
 
 import utils
 from config import first_launch_configure
@@ -76,6 +77,8 @@ from features.misc import (
 )
 from features.prompt import Prompt
 from features.startup_splash import StartupSplash
+from features.spiral_overlay import handle_spiral_overlay
+from features.binaural_overlay import handle_binaural_overlay
 from features.subliminal_popup import SubliminalPopup
 from features.video_popup import VideoPopup
 from os_utils import is_linux, is_windows
@@ -191,6 +194,22 @@ if __name__ == "__main__":
 
     root = Tk()
     root.withdraw()
+
+    def log_callback_exception(exc_type, exc_value, exc_traceback) -> None:
+        # Tkinter's default behavior for an exception raised inside any
+        # .after()/bind()-driven callback is to print it to stderr and keep
+        # the mainloop running - invisible in .pyw (windowed, no console)
+        # mode, and never reaches this app's own log file since it bypasses
+        # `logging` entirely. That silence looks identical to "nothing is
+        # wrong" from the outside: the window stays alive and responsive,
+        # every popup type just quietly stops happening. Routing it through
+        # logging.exception() puts it in the same log file everything else
+        # already goes to, console or not, without changing the actual
+        # (deliberately non-fatal) Tkinter behavior of continuing to run.
+        logging.exception("Unhandled exception in a Tk callback", exc_info=(exc_type, exc_value, exc_traceback))
+
+    root.report_callback_exception = log_callback_exception
+
     settings = Settings()
     ensure_panic_wallpaper()  # Before pack/wallpaper handling, so Panic never falls back to a generic image
 
@@ -231,26 +250,43 @@ if __name__ == "__main__":
     if is_linux() and get_desktop_environment() in ("i3", "dwm", "bspwm", "xmonad", "openbox"):
         targets = targets[::-1]
 
+    def safe_step(description: str, fn: Callable[[], None]) -> None:
+        # Each of these is an independent feature - a failure in one (e.g.
+        # make_desktop_icons() unable to save a .lnk file, as seen in a real
+        # report) must never prevent the others from running, and especially
+        # must never prevent panic setup or the actual popup loop below from
+        # being reached. Previously a single exception here silently killed
+        # every remaining step in start_main() for the rest of the session -
+        # invisible even after the report_callback_exception fix above,
+        # since by the time that fires the damage (skipped steps) is already
+        # done. Logs and moves on instead.
+        try:
+            fn()
+        except Exception:
+            logging.exception(f"Non-fatal error during startup: {description} - continuing with the rest of startup")
+
     def start_main() -> None:
-        make_tray_icon(root, settings, pack, state, lambda: main_hibernate(root, settings, pack, state, targets))
-        make_desktop_icons(settings)
+        safe_step("tray icon", lambda: make_tray_icon(root, settings, pack, state, lambda: main_hibernate(root, settings, pack, state, targets)))
+        safe_step("desktop icons", lambda: make_desktop_icons(settings))
         if not do_not_press:
             # Already started immediately below instead, so panic (and its
             # lockout) is live for the whole silent wait, not just from here.
-            handle_keyboard(root, settings, state)
-            start_panic_listener(root, settings, state)
+            safe_step("keyboard/panic-key handling", lambda: handle_keyboard(root, settings, state))
+            safe_step("panic listener", lambda: start_panic_listener(root, settings, state))
         Thread(target=lambda: replace_images(settings, pack), daemon=True).start()  # Thread for performance reasons
-        handle_corruption(root, settings, pack, state)
-        handle_discord(settings, pack)
+        safe_step("corruption mode", lambda: handle_corruption(root, settings, pack, state))
+        safe_step("Discord rich presence", lambda: handle_discord(settings, pack))
         if not do_not_press:
-            handle_panic_lockout(root, settings, state)
-        handle_mitosis_mode(root, settings, pack, state)
-        run_script(root, settings, pack, state)
+            safe_step("panic lockout", lambda: handle_panic_lockout(root, settings, state))
+        safe_step("mitosis mode", lambda: handle_mitosis_mode(root, settings, pack, state))
+        safe_step("pack startup script", lambda: run_script(root, settings, pack, state))
+        safe_step("spiral overlay", lambda: handle_spiral_overlay(root, settings, pack))
+        safe_step("binaural overlay", lambda: handle_binaural_overlay(root, settings, pack))
 
         if settings.hibernate_mode:
             start_main_hibernate(root, settings, pack, state, targets)
         else:
-            handle_wallpaper(root, settings, pack, state)
+            safe_step("wallpaper handling", lambda: handle_wallpaper(root, settings, pack, state))
             main(root, settings, pack, targets)
 
     if do_not_press:
@@ -258,9 +294,9 @@ if __name__ == "__main__":
         # not inside start_main() - the point of this feature is that panic
         # is reachable (gated by the safeword/lockout timer, same as normal)
         # for the entire wait, not only once something visible happens.
-        handle_keyboard(root, settings, state)
-        start_panic_listener(root, settings, state)
-        handle_panic_lockout(root, settings, state)
+        safe_step("keyboard/panic-key handling", lambda: handle_keyboard(root, settings, state))
+        safe_step("panic listener", lambda: start_panic_listener(root, settings, state))
+        safe_step("panic lockout", lambda: handle_panic_lockout(root, settings, state))
         delay_ms = int(random.uniform(5, 90) * 60 * 1000)
         logging.info(f"Do Not Press is armed: waiting {delay_ms / 60000:.1f} minutes before starting")
         if settings.startup_splash:

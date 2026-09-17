@@ -95,32 +95,28 @@ Roughly newest to oldest. This is a summary - see
 **The biggest changes, regardless of version number:**
 * Animated WebP images no longer show up as a black square - ffmpeg/mpv genuinely cannot
 decode them at all, so they're now played back natively instead of being handed to mpv.
-* Edgeware would fail to start at all on Python 3.8+ due to a DLL-loading issue in how
-it locates libmpv - fixed.
-* `config.pyw` rebuilt from a 4-line stub into an actual tool (see Usage above).
+* A real, from-scratch scraper built for the Gelbooru-engine family of sites (Gelbooru,
+Rule34, Safebooru, and others sharing that JSON API), plus a "Test Download Sites" tool
+in config.pyw that checks all 18 known sites against your real settings and shows exactly
+which work, which don't, and why.
+* `config.pyw` rebuilt from the ground up to give clear, full control over the pack runs.
 * A pack's own settings (under Pack Priority) were being silently wiped out the instant
 corruption's first level applied - fixed.
-* Popups appearing behind other windows, especially right after launching - fixed.
+* New optional full-screen spiral overlay with a paired binaural audio layer - both react
+live to session intensity (spiral/subliminal chance, message frequency, popup speed) and
+ease gradually as corruption escalates rather than jumping, with hard caps on both
+(opacity capped at 50%, audio volume capped at a gentle 15-35%) so neither can take over
+the screen or ears.
 
-**v22.1.0** - Real scraper built for the Gelbooru-engine family of sites
-(Gelbooru, RealBooru, Hypnohub, Rule34, Safebooru, Xbooru, Tbib, Atfbooru,
-Behoimi) - JSON API first, falls back to scraping the search page directly
-when the API is down or unusable (which is exactly what was silently
-breaking downloads on 2 of these sites), with proper full-resolution image
-resolution instead of guessing at URLs. The other 3 site families are
+**v22.1.0** - Real scraper built for the Gelbooru-engine family of sites.
+The other 3 site families are
 shown dimmed in the checklist as a "not rebuilt yet" reminder - still
-clickable, not locked. Also: the Windows Startup shortcut (including
-during Do Not Press arming) could fail completely silently with zero
-indication anything went wrong - now actually detects and reports that.
-Site checklist no longer gets cut off on narrower windows. Video popups no
-longer flash a full-size blank window right before playback starts.
+clickable, not locked. 
 
 **v22.0.11** - Video popups freezing every click on-screen, especially in
 video-heavy packs, while a video's size was being read - fixed by moving
 that off the main thread. Online image downloads expanded from a hardcoded
-single site (Gelbooru) to a checkbox list of ~18 sites (search picks one at
-random each time), plus a working minimum-score filter that was previously
-defined but never actually implemented.
+single site (Gelbooru) to a checkbox list of ~18 sites.
 
 **v22.0.8** - Edgeware wouldn't start at all on newer Python, due to the DLL-loading
 issue above.

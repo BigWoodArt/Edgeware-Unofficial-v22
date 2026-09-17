@@ -123,20 +123,25 @@ def confirm_overwrite(path: Path) -> bool:
     return confirm
 
 
-def get_live_version() -> str:
-    url = "http://raw.githubusercontent.com/araten10/EdgewarePlusPlus/main/edgeware/assets/default_config.json"
+def get_live_version() -> str | None:
+    # Points at this fork's own repo, not the original Araten/EdgewarePlusPlus
+    # upstream - checking upstream here would compare this fork's frozen
+    # legacy version marker against an unrelated project's, and could prompt
+    # someone to go "update" from a link that has nothing to do with this
+    # fork (or is even older than what they're running).
+    url = "https://raw.githubusercontent.com/BigWoodArt/Edgeware-Unofficial-v22/main/edgeware/assets/default_config.json"
 
     test = config["toggleInternet"]
     if test != 0:
         logging.info("GitHub connection is disabled, version will not be checked.")
-        return "Version check disabled!"
+        return None
 
     try:
         with open(urllib.request.urlretrieve(url)[0], "r") as live_config:
             return json.loads(live_config.read())["versionplusplus"]
     except Exception as e:
         logging.warning(f"Failed to fetch version on GitHub.\n\tReason: {e}")
-        return "Could not check version."
+        return None
 
 
 def write_save(vars: Vars, exit_at_end: bool = False) -> None:

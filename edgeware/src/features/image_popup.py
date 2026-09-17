@@ -43,6 +43,20 @@ ALLOWED_BOORU_SITES = {
     "Rule34", "Safebooru", "Tbib", "Xbooru", "Yandere",
 }
 
+# Maps config/items.py's "imageResizeFilter" choice to the actual PIL filter.
+# Bilinear is the default: on a typical downscale (a large source image into
+# a much smaller popup) it is visually very close to Lanczos while costing a
+# few times less CPU - Lanczos's real advantage shows up upscaling or with
+# fine line art/text near native size, not shrinking a photo into a popup.
+# Bicubic sits in between. Exposed as a choice rather than only ever
+# Bilinear since a person is free to judge the trade-off differently on
+# their own hardware/packs.
+RESIZE_FILTERS = {
+    "Bilinear": Image.BILINEAR,
+    "Bicubic": Image.BICUBIC,
+    "Lanczos": Image.LANCZOS,
+}
+
 
 def download_booru_image(settings: Settings) -> str | None:
     """Search a random site from settings.booru_sites (comma-separated) for
@@ -122,6 +136,7 @@ class ImagePopup(Popup):
         else:
             image = Image.open(self.media)
         self.compute_geometry(image.width, image.height)
+        logging.info(f"Image popup: \"{self.media.name}\" (corruption level {self.state.corruption_level}) at ({self.x}, {self.y}), monitor {self.monitor.name}")
 
         # Static          -> image
         # Static,   hypno -> image overlay, mpv
@@ -146,7 +161,7 @@ class ImagePopup(Popup):
                 self.player.properties["glsl-shaders"] = self.try_denial_filter(True)
                 self.player.play(str(self.media))
         else:
-            resized = image.resize((self.width, self.height), Image.LANCZOS).convert("RGBA")
+            resized = image.resize((self.width, self.height), RESIZE_FILTERS.get(self.settings.image_resize_filter, Image.BILINEAR)).convert("RGBA")
             filter = self.try_denial_filter(False)
             if filter == "resizeblur":
                 shrink_d = randint(5, 15)

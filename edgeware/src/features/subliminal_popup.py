@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with Edgeware++.  If not, see <https://www.gnu.org/licenses/>.
 
-from tkinter import Canvas, Toplevel
+from tkinter import Canvas, TclError, Toplevel
 
 import os_utils
 import utils
@@ -69,6 +69,28 @@ class SubliminalPopup(Toplevel):
 
         self.geometry(f"+{x}+{y}")
         self.after(settings.subliminal_timeout, self.destroy)
+        # A later popup (image, video, ...) reasserting its own topmost status
+        # steals the top of the stack from this window the same way it always
+        # could from any other Toplevel - see popup.py's _reassert_topmost for
+        # the same issue there. Unlike that one-time reassertion, this keeps
+        # reclaiming the top spot for as long as the subliminal is alive, so a
+        # popup appearing after it can't leave the text buried underneath for
+        # its whole (usually sub-second) visible duration. No focus_force()
+        # here deliberately - unlike a popup you're meant to interact with,
+        # this is a passive overlay, and repeatedly stealing keyboard focus
+        # every tick would be actively disruptive to whatever the person is
+        # doing elsewhere.
+        self._relift_interval_ms = 250
+        self.after(self._relift_interval_ms, self._periodic_relift)
+
+    def _periodic_relift(self) -> None:
+        try:
+            self.attributes("-topmost", False)
+            self.attributes("-topmost", True)
+            self.lift()
+        except TclError:
+            return  # Already destroyed - nothing left to keep re-lifting
+        self.after(self._relift_interval_ms, self._periodic_relift)
 
     def should_init(self) -> bool:
         return self.subliminal

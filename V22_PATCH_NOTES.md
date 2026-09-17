@@ -810,3 +810,529 @@ geometry before the delay, real computed geometry after it, zero errors.
 
 Version bumped to v22.1.0 (a real feature addition, not a patch-level
 fix, hence the minor version bump rather than another patch increment).
+
+## 27. v22.2.0 - original v21 config UI restored as an option, self-update checks for both config tools
+
+**1) `config_original.pyw` added.** The person supplied the original 4-line
+launcher stub (`import subprocess; ...; subprocess.run([sys.executable,
+Process.CONFIG])`) and asked for it packaged as an alternate config tool,
+faithful to the original v21 UI, for people who prefer it over config.pyw's
+rebuild. The actual UI code this launches (`src/main_config.py` +
+`src/config/window/*`, ~21 files) was already sitting untouched in the repo
+since config.pyw replaced it as the default - this wasn't new code, just
+verifying it and wiring the launcher back in.
+
+Tested headless (xvfb, mainloop patched out, `pystray`/`mpv` stubbed per the
+usual pattern): imports cleanly, builds every tab, destroys cleanly against
+the current v22.1 engine and item set. No compatibility breaks.
+
+Deliberately did NOT backport config.pyw's newer booru site checklist into
+this UI's Booru tab (per-site engine family info, dimmed unconfirmed sites,
+etc.) - it stays a single "Download from Booru" toggle + tag list like the
+original, on request, to keep this UI faithful to v21 rather than a hybrid.
+`booruSites` still works, just isn't editable from this particular UI (it
+keeps whatever was last saved via config.pyw, default "Gelbooru").
+
+**2) Old UI's built-in version-check bug found and fixed.** Investigating
+this UI surfaced two real problems in its legacy "Update Available" check
+(`config/window/utils.py`'s `get_live_version()` + the caller in
+`config/window/__init__.py`):
+- It was checking the *original* araten10/EdgewarePlusPlus upstream repo,
+  not this fork. Since this fork's versioning has diverged completely, a
+  mismatch there is meaningless at best and actively misleading at worst -
+  telling someone to go "download newer files" from an unrelated repo,
+  which the person specifically didn't want (risk of reading as a prompt to
+  revert to v21). Repointed to this fork's own repo
+  (BigWoodArt/Edgeware-Unofficial-v22) instead, comparing the same
+  `versionplusplus` field in `assets/default_config.json` against itself -
+  stays silent unless that field is deliberately bumped in a future release
+  of this same UI.
+- Separately, a real pre-existing bug: on network failure or with
+  `toggleInternet` disabled, `get_live_version()` returned the *string*
+  `"Could not check version."` / `"Version check disabled!"`, which then
+  got compared directly against the real version string - producing a false
+  "Update Available" popup on every offline run or disabled-internet run,
+  not just genuine mismatches. Now returns `None` on either path, and the
+  caller only nags on an actual successful, differing fetch.
+
+Verified all three paths directly (mocked `urlretrieve` for the offline
+case): matching version → silent, differing version → nag shown, offline/
+disabled → silent, no crash.
+
+**3) config.pyw gained its own self-update check**, in the same spirit as
+above but for the actively-developed tool: on startup, a background thread
+(non-blocking - won't freeze the GUI on a slow or unreachable connection,
+same reasoning as the mpv-thread fix in v22.0.9) fetches this fork's own
+`config.pyw` from GitHub, pulls its `VERSION` string via regex, and compares
+version tuples (not raw strings - `"22.10.0" > "22.9.0"` needs to actually
+parse as such). If newer, the subtitle bar gains a colored, clickable
+"UPDATE AVAILABLE: vX.Y.Z" note that opens the repo; otherwise nothing
+changes. Fails silently on any network error, same as above - never a
+crash, never a false positive.
+
+Verified all three paths directly against the real GUI (real `mainloop()`
+running in the test, not patched out, so the background thread's
+`root.after()` callback could actually fire): local behind remote → notice
+shown with correct color and URL bound; local matching remote → subtitle
+unchanged; `urlopen` raising → subtitle unchanged, no exception surfaced.
+
+Version bumped to v22.2.0 (restoring a whole alternate config tool is a
+real feature addition, not a patch-level fix).
+
+## 28. v22.2.1 - real bug: one broken feature at startup could silently kill panic and every popup
+
+A real user report: a pack loaded (startup image played fine) but no popups
+ever appeared, and Panic was completely dead - had to kill Python via Task
+Manager. Traced with a live traceback from the person's own machine (Python
+3.14.7, Windows), not guessed:
+
+```
+OSError: Shortcut "C:\Users\...\Desktop\Edgeware++.lnk" was not created
+(...WshShortcut.Save: Unable to save shortcut...)
+```
+
+**Root cause, two compounding issues:**
+1. `start_main()` (in `main_edgeware.py`) runs every startup step -
+   tray icon, desktop icons, panic setup, corruption, Discord, mitosis,
+   pack script, wallpaper, then finally the actual popup loop - as one
+   unbroken sequence with no isolation between steps. `make_desktop_icons()`
+   throwing (a `.lnk` shortcut failing to save - environment-specific,
+   likely OneDrive or antivirus blocking the write, not something this
+   patch controls) killed every single step after it in the same call,
+   including `handle_keyboard()`/`start_panic_listener()` (Panic) and the
+   final `main()` call that actually starts the popup loop. A failure in a
+   purely cosmetic feature took the whole session down with it.
+2. That failure was completely invisible. `start_main()` runs as a chained
+   Tk `.after()` callback (from the startup splash's fade-out), and
+   Tkinter's default behavior for an exception in any `.after()`/`bind()`
+   callback is to print it to stderr and keep the mainloop running - never
+   raised as a real exception, never touching this app's own log file
+   (which only captures `logging` calls), and invisible in `.pyw`
+   (windowed, no console) mode since stderr goes nowhere. The window stays
+   open and responsive - looks identical to "everything's fine" from the
+   outside, indistinguishable from a slow pack or bad luck on random rolls.
+
+**Fixes, both in `main_edgeware.py`:**
+- `root.report_callback_exception` is now hooked to route through
+  `logging.exception(...)`, so any future exception in a Tk callback lands
+  in the same log file as everything else, console or not. Verified
+  directly: a simulated callback exception now appears in the log with a
+  full traceback, mainloop still running.
+- Every independent step inside `start_main()` (and the equivalent Do Not
+  Press startup sequence) is now wrapped in a small `safe_step()` helper
+  that logs and continues instead of propagating. Verified by reproducing
+  the exact reported `OSError` in isolation: Panic setup and the popup loop
+  both still run afterward, and the failure is now logged instead of
+  vanishing.
+
+The underlying shortcut-save failure itself is environment-specific (not
+something to "fix" in this codebase) - the point of this patch is that it
+can no longer take Panic and every popup down with it regardless of cause.
+
+Also surfaced during the same investigation, still open (Pack Builder side,
+not this repo): a corruption-level `capPopTimer` unit mismatch (pack
+authors entering seconds where the engine expects raw milliseconds) and a
+possible `index.json` media-filename mismatch preventing image/video
+selection - both reported to the Pack Builder chat, not fixed here.
+
+Version bumped to v22.2.1 (bug fix, not a feature addition).
+
+## 29. v22.2.2 - subliminal text no longer gets buried, a booru site health-check tool, and an optional full-screen spiral overlay
+
+Three changes this patch, none dependent on each other:
+
+**1) Subliminal caption popup no longer loses the topmost race.** Reported
+directly: subliminal (flashing caption) text was getting visually covered
+by a later image/video popup during normal play. Root cause: `SubliminalPopup`
+(`features/subliminal_popup.py`) only ever asserted `-topmost` once, at
+creation, with no reassertion at all - not even the one-time 50ms fix
+`Popup` (the base class for every other popup type) already has for a
+related Windows quirk. Any popup appearing after it, even one with nothing
+to do with hypno/subliminal content, would naturally end up above it in the
+topmost stacking order the instant *that* popup did its own one-time
+reassert. Fixed by having `SubliminalPopup` keep re-lifting itself every
+250ms for as long as it's alive, so it reclaims the top of the stack within
+a fraction of a second of losing it - not just once. Deliberately does NOT
+call `focus_force()` on every tick the way the one-time popup reassert does
+- this is a passive overlay, not something meant to be interacted with, and
+repeatedly stealing keyboard focus every 250ms would be actively disruptive
+to whatever the person is doing in another window. Verified directly: the
+re-lift fires on schedule and stops cleanly (catches `TclError`) once the
+popup is destroyed, no lingering `.after()` callbacks hitting a dead window.
+
+**2) "Test Download Sites" tool added to config.pyw's Troubleshooting tab.**
+Runs one real, minimal (limit=1) request to every one of the 18 known booru
+sites - not just the ones currently checked - using the person's actual
+saved tags/min score/API key, through whichever real code path a live
+download would use (the rebuilt `booru_scraper` for the 9 confirmed
+Gelbooru-family sites, the third-party `booru` package for the other 9,
+same split `download_booru_image()` already uses). Live-updating color-coded
+log (OK / EMPTY-no-results / FAIL-with-actual-error) as it runs, Cancel
+button, and a "Save Full Log" button that writes a timestamped file to
+`data/logs/`. Deliberately tests every known site regardless of current
+selection, including the dimmed "not guaranteed yet" ones - so a working
+site doesn't stay unconfirmed forever, and a failing one's real error
+(auth requirement, dead server, connection failure, ...) is on record
+instead of just "doesn't work." Verified with mocked scraper/booru modules
+covering all three outcomes on both code paths, plus the Cancel button
+(via a real widget `.invoke()`, not just calling the handler directly) and
+the log-file writer.
+
+**3) Optional full-screen spiral overlay**, `features/spiral_overlay.py`.
+One persistent, click-through, per-monitor window, opacity scaling linearly
+with the pack's own hypno/spiral chance (`settings.hypno_chance` - the same
+value driving the existing per-image hypno overlay in `image_popup.py`,
+not a separate setting): 0% chance -> 0% opacity, 100% chance -> 50%
+opacity, capped there deliberately so it can never fully hide the screen.
+New settings `spiralOverlayEnabled` (off by default) and `spiralOverlayAsset`
+(Classic / Two-Arm Taper / One-Arm Taper / Pack's Own), the first three
+being new bundled assets in `assets/spirals/` - all three procedurally
+generated (pure polar-coordinate math, no external source image at all,
+sidestepping any licensing question entirely), 500x500, confirmed to
+upscale cleanly to any monitor resolution using the same `video-scale-x`/
+`-y` stretch-to-fill technique already used for the per-image hypno overlay,
+plus an explicit `ewa_lanczossharp` scale filter (not set anywhere else in
+the codebase, since nothing else stretches this far past its source
+resolution) so a small source GIF blown up several times over stays smooth
+rather than blocky. Wired into `start_main()` through the `safe_step()`
+isolation from v22.2.1, so a failure here can't take anything else down
+either. Re-lifts itself the same way the subliminal popup now does, for the
+same reason. Verified end-to-end with a mocked two-monitor setup (1920x1080
++ 3840x2160): correct per-monitor geometry and aspect-ratio scale factors,
+correct opacity at several chance values, clickthrough applied to every
+window, no crashes across several re-lift cycles. (Actual on-screen opacity
+couldn't be visually confirmed in this sandbox - Xvfb has no compositor, so
+`-alpha` always reads back as 1.0 regardless of what's set, confirmed with a
+two-line reproduction outside any of this patch's own code. The opacity
+value being computed and passed in was verified correct; only the headless
+rendering environment couldn't confirm the visual result.)
+
+Version bumped to v22.2.2.
+
+## 30. v22.2.3 - subliminal text tracks corruption live, and a paired binaural audio layer for the spiral overlay
+
+Four changes this patch:
+
+**1) Subliminal caption popup no longer loses the topmost race** - carried
+over from the design work done ahead of this patch. `SubliminalPopup` now
+re-lifts itself every 250ms for as long as it's alive instead of just once
+at creation, so a later image/video popup can't leave it buried underneath
+for its whole visible duration. Deliberately no `focus_force()` on the
+repeating re-lift - this is a passive overlay, not something meant to be
+interacted with, and stealing keyboard focus every 250ms would be
+disruptive to whatever the person's doing elsewhere. Verified: fires on
+schedule, stops cleanly (catches `TclError`) once destroyed.
+
+**2) "Test Download Sites" tool** added to config.pyw's Troubleshooting
+tab - tests all 18 known booru sites (not just currently-checked ones) with
+the person's real saved tags/min score/API key, through whichever real code
+path an actual download would use. Live color-coded log (OK / EMPTY / FAIL
+with the real error), Cancel button, "Save Full Log" writes a timestamped
+file to `data/logs/`. Verified with mocked scraper/booru modules covering
+all three outcomes on both code paths, plus the Cancel button via a real
+widget `.invoke()`.
+
+**3) Full-screen spiral overlay's opacity now tracks corruption live,
+instead of being fixed for the whole session.** Original v22.2.2 build
+computed opacity once at startup from `hypno_chance` and never revisited
+it - meaning if a pack (very plausibly) starts at 0% and only raises
+`hypno_chance` at a later corruption level, as real pack data confirmed
+happens, the overlay would never even have been created in the first
+place. Fixed: the overlay window is now always created when the feature is
+enabled (even at a starting opacity of 0%, i.e. invisible), and the same
+periodic re-lift tick that already existed re-reads `hypno_chance` and eases
+the *displayed* opacity toward wherever it currently points, one percentage
+point per 250ms tick, rather than snapping - about 12-13 seconds for a full
+0%-50% swing either direction. Verified directly: simulated a corruption
+escalation mid-session and confirmed the opacity ramps smoothly to the new
+target with no jump, in both directions (tested rising 0%->25% and falling
+100%->0%).
+
+**4) New: optional binaural audio layer, paired with the spiral overlay**
+(`features/binaural_overlay.py`) - rides the same `spiralOverlayEnabled`
+toggle rather than a separate switch, since it was specifically requested
+as an addition to that feature, not a second thing to manage. Blends three
+live signals into a single 0-1 "intensity" score: `hypno_chance` (same
+value driving the spiral), `subliminal_chance` (subliminal message
+frequency), and popup speed (`delay`, inverted). Intensity maps to two
+things, both hard-capped regardless of any input: beat frequency 12Hz
+(calm) down to 4Hz (deep), and volume 15%-35% of pyglet's 0-1 range -
+deliberately independent of the person's own `audioVolume` setting, so a
+maxed-out volume slider can never make this loud (features/audio.py's
+existing `fade_in`/`fade_out` fade *toward* `settings.audio_volume`, which
+would have defeated this cap if reused as-is - this feature has its own
+fade-to-explicit-target helper instead). No live audio synthesis - ten
+pre-generated loops (200Hz carrier, beat stepped 4-12Hz, procedurally
+synthesized pure sine tones, not sourced from anywhere) live in
+`assets/binaural/` as OGG Vorbis (compressed from an initial ~79MB WAV grid
+down to ~1.2MB total), and playback crossfades from whichever is currently
+playing to the nearest match as the target frequency drifts, easing volume
+the same gradual way the spiral's opacity does. These player instances are
+deliberately kept out of `state.audio_players` so they never compete with
+real pack audio for a `max_audio` playback slot.
+
+Caught one real bug during testing, not by re-reading the code but by
+actually running it end-to-end with mocked playback: the file-index math
+was inverted relative to how the generation grid actually ordered the
+files, so a calm session would have played the deep/intense tone and vice
+versa. Fixed and reverified after the fix.
+
+A 2000-sample fuzz test across random hypno_chance/subliminal_chance/delay
+combinations confirmed the two hard caps (volume, beat frequency) can't be
+exceeded by any input.
+
+Version bumped to v22.2.3.
+
+## 31. v22.2.4 - "Test Download Sites" no longer misreports the booru package's own "no results" idiom as a failure
+
+Directly caught by the person running the tool against their own install and
+sharing the results: several sites (Danbooru, Furbooru, Konachan,
+Konachan_Net) showed as FAIL, but the actual exception text in every case
+was the third-party `booru` package's own hardcoded message for "zero
+results" - confirmed by reading the package's source
+(`utils/fetch.py`, `client/furbooru.py`, `client/paheal.py` all raise a
+bare `Exception` or `ValueError` carrying the literal string "no results,
+make sure you spelled everything right" instead of returning an empty
+list). `_test_one_booru_site()` in config.pyw was catching that exception
+and reporting it identically to a genuine failure, when it's actually the
+same situation `booru_scraper`'s own EMPTY case already covers - the site
+answered fine, nothing matched the tags/score. Fixed: that specific message
+is now recognized and reported as EMPTY. Verified against the exact three
+raise-sites in the real package (bare `Exception`, `ValueError`, and a
+genuine unrelated exception that must NOT be swallowed by this - `ExpatError`
+still reports correctly as FAIL).
+
+Following up with a real re-test after the fix went in confirmed the
+diagnosis: those same sites returned OK once a tag that actually had matches
+was used, exactly as predicted.
+
+Separately investigated (not fixed, out of scope for a classification tweak)
+why Paheal fails consistently regardless of tags: the `booru` package's
+Paheal client hits a hardcoded legacy endpoint
+(`/api/danbooru/find_posts/index.xml`) expecting an XML response, but a real
+response from Paheal's current Shimmie2 v2.11.5 install (confirmed via a
+page source the person captured directly) shows it's just the normal HTML
+site - that old XML API path is stale for the site's current version.
+`xmltodict.parse()` then throws immediately on the HTML's doctype line,
+matching the "line 1, column 0" error exactly. Not a "wrong tags" problem,
+not a "no results" problem - a genuine third-party package incompatibility
+with the current site. No code change from this - would need either an
+updated `booru` package release or a from-scratch Paheal scraper (parsing
+the real HTML page directly, the same approach `booru_scraper.py` already
+takes for the Gelbooru family) to actually fix, which is new scope, not a
+patch-sized tweak. Paheal and the rest of the non-Gelbooru-family sites
+stay dimmed/"not guaranteed yet" in the site checklist - this patch doesn't
+change that classification, just how the test tool reports on them.
+
+Version bumped to v22.2.4.
+
+## 32. v22.2.5 - real bug: spiral overlay was blocking every click, not passing them through
+
+Reported directly: the spiral overlay appeared to be blocking clicks meant
+for popups underneath it - the opposite of the intended behavior (this
+overlay is supposed to be fully click-through, never interactable).
+
+Root cause: `SpiralOverlay.__init__` (features/spiral_overlay.py) called
+`os_utils.set_clickthrough(self)` immediately after window creation -
+before geometry was set, before the video player was attached, before the
+window was mapped/visible at all. The existing `Popup` base class (used by
+every other popup in the codebase, and working correctly) deliberately
+applies this *last*, in `try_clickthrough()`, and explicitly calls
+`self.wait_visibility()` first if there's no player attached yet - because
+setting this Windows-level "let clicks pass through" flag on a window
+before the OS has actually realized/mapped it can silently fail to take
+effect. The spiral overlay never followed that established ordering, so it
+was very likely sitting there as an ordinary (click-blocking) topmost
+window the whole time, invisible-but-solid, eating every click meant for
+whatever was underneath it - popups included.
+
+Fixed: moved the `set_clickthrough` call to after geometry, player
+creation, and playback start, with an explicit `wait_visibility()`
+immediately before it - mirroring `Popup`'s approach exactly. Cost of the
+blocking wait is a non-issue here since this runs once per monitor at
+startup, not per popup roll.
+
+Verified directly: instrumented `set_clickthrough` in a test to record
+whether the window was mapped (`winfo_ismapped()`) at the moment it's
+called - confirmed `1` (mapped) after the fix, versus never being checked
+at all before.
+
+Version bumped to v22.2.5.
+
+## 33. v22.2.6 - subliminal/notification pools no longer borrow from captions, denial description fixed, new Hypnotics tab
+
+Four changes this patch:
+
+**1) `pack.random_subliminal()` no longer falls back to captions.** Reported
+directly: a pack with no subliminal text defined for corruption level 1 was
+showing text anyway - longer than the pack's actual one-word subliminal
+messages. Root cause: `random_subliminal()` (pack/__init__.py) fell back to
+`self.random_caption()` whenever the subliminals pool was empty for the
+currently active moods, rather than returning `None`. An empty pool at a
+given corruption level is a pack author's deliberate "show nothing here,"
+not an invitation to substitute a different pool's content. Fixed - now
+returns `None` when empty, which `SubliminalPopup.should_init()` already
+correctly treats as "don't show anything."
+
+**2) `pack.random_notification()` had the exact same bug**, caught while
+looking at the first one - same fallback-to-captions pattern, same fix,
+same reasoning: notifications, subliminals, and captions are three distinct
+pools serving different roles, and a pack leaving one empty shouldn't mean
+borrowing from another. Confirmed the only caller (`send_notification()` in
+features/misc.py) already safely handles `None` via `if not notification:
+return` - no other changes needed.
+
+**3) "Popup denial chance"'s description was simply wrong.** It read
+"Chance that a popup refuses to close normally," describing a feature that
+doesn't exist. Traced the actual code (`try_denial_filter()` /
+`try_denial_text()` in features/popup.py): denial chance controls whether a
+popup shows a blurred or pixelated version of the image with teasing text
+overlaid on it - nothing about how the popup closes (that's governed
+separately, unrelated to denial). Description corrected to describe what it
+actually does, with an explicit note that it doesn't affect closing
+behavior.
+
+**4) New "Hypnotics" tab in config.pyw**, addressing tabs (particularly
+"Popup Details" at 25 rows) getting crowded. Moved every subliminal/spiral/
+binaural-related setting into it: the 5 subliminal caption settings
+(chance/timer/opacity/text color/outline color), the 2 image-overlay spiral
+settings (chance/opacity), and the 2 full-screen spiral+binaural settings
+(enable/asset) - 9 rows total. "Popup Details" drops from 25 rows to 15.
+The full-screen toggle's label now reads "Full-Screen Spiral + Binaural
+Audio" (proper-noun-style capitalization, since it's now the centerpiece of
+its own dedicated tab) rather than the previous all-lowercase phrasing.
+Main window grown to accommodate the extra tab and generally less cramped
+layout: 1060x700 -> 1060x800, minsize 900x600 -> 900x680.
+
+Verified all four directly: confirmed section row counts and key lists
+post-move, confirmed the new tab renders without error, confirmed the fixed
+denial description text, confirmed window geometry takes effect.
+
+Version bumped to v22.2.6.
+
+## 34. v22.2.7 - setup script surfaces version problems visibly, video-popup title-bar flash fixed, image resizing defaults to a cheaper filter
+
+Three changes this patch:
+
+**1) `EdgewareSetup.bat` now actually checks the installed Python version**,
+rather than just printing an informational note that scrolls past in the
+console. Checked via `py -c "import sys; exit(0 if sys.version_info >=
+(3, 12) else 1)"` - an exact tuple comparison, not fragile text-parsing of
+`py --version`'s output (which breaks across two-vs-three-digit minor
+versions, e.g. naive string comparison would say "3.9" > "3.12"). Below
+3.12, shows a real Windows message box, not just console text. The two
+existing failure cases (pip install failing, libmpv download/extract
+failing) were already detected but only surfaced as console text easy to
+miss scrolling past - both now also show a message box.
+
+**2) Real bug: a brief flash of Windows' default title bar before a video
+popup appears.** Reported directly, described as quick and hard to
+pin down, with the "blue bar" being Windows' default active-title-bar
+color. Root cause: `set_borderless()` (which suppresses the title bar) was
+applied to the popup window after it already existed - nothing stopped the
+OS from painting one frame with the native decoration first, since the
+window manager's own paint cycle runs independently of how fast Tkinter's
+calls happen. More noticeable on video popups specifically since they stay
+in a not-fully-ready state longer than image popups (mpv startup + the
+existing corner-tuck heuristic), giving that stray frame more of a chance
+to land during a visible moment. Fixed in the shared `Popup` base class
+(`features/popup.py`): withdraw immediately on creation, apply borderless
+while hidden, then show again - a tight bracket around just that one call,
+so nothing else about popup timing changes. Verified the logic holds up
+under an isolated test; actually seeing a rendered Windows title bar isn't
+possible from this Linux sandbox, so the visual result itself needs
+confirming on a real run.
+
+**3) Image resizing now defaults to Bilinear instead of Lanczos**, with
+Bicubic and Lanczos still available as a choice. Investigated a separate
+report (popups stalling when trying to click them away, with clicks
+appearing to "batch up" and all land at once) - measured Lanczos resizing
+a large image at ~200ms of pure main-thread-blocking time, on the same
+thread that handles every click, for every popup, every time. That's the
+same class of bug already fixed for video probing in v22.0.9, just never
+applied to image resizing. Swapping to Bilinear alone cuts that cost
+several times over (~30-40ms measured, vs ~150-200ms for Lanczos) with no
+threading involved - measured against both random-noise and more realistic
+gradient/shape/text content, and a direct side-by-side visual comparison,
+before deciding the quality difference was negligible for a downscale (Lanczos's
+real advantage shows up upscaling or with fine detail near full size, not
+shrinking a photo into a popup). New "Image resize quality" choice added to
+config.pyw's Troubleshooting tab (Bilinear default, Bicubic, Lanczos) for
+anyone who wants to judge that trade-off differently on their own hardware.
+
+While adding that setting, found and retired a genuinely dead one sitting
+in the same spot: "Use Lanczos image resizing" existed as a checkbox in
+Troubleshooting and in default_config.json, but was never registered in
+config/items.py's settings list - the engine never read it, so it did
+nothing regardless of its checked state. Removed rather than left next to
+a real, working control with a confusingly similar name.
+
+This doesn't fully eliminate every possible stall on an especially heavy
+pack by itself (the underlying image-loading pipeline is still synchronous
+on the main thread) - a fuller fix, background-threading that pipeline the
+same way video probing already is, was discussed and scoped but not
+undertaken this patch; the filter swap addresses the dominant cost with
+none of that fix's complexity or risk.
+
+Version bumped to v22.2.7.
+
+## 35. v22.2.8 - reverted the video title-bar-flash fix from v22.2.7, which broke image and video popups entirely
+
+Reported directly, immediately after v22.2.8's predecessor shipped: the
+startup image loaded, but no other image popups appeared at all, video
+popups showed a brief flash "as if the video would load" and then nothing,
+and system notifications kept working fine. Happened identically with both
+the Bilinear and Lanczos resize filter options, which ruled out the resize
+filter change from the same patch as a cause - the one thing actually
+shared by every affected popup type (images and videos both broken,
+notifications - which don't go through the Popup class at all - unaffected)
+was the withdraw/deiconify bracket added to `Popup.__init__` in v22.2.7 to
+fix a video-popup title-bar flash.
+
+That fix was flagged as unverifiable from this sandbox at the time (no way
+to render or observe real Windows title-bar behavior from Linux), and
+that risk materialized as a real regression: withdrawing and deiconifying
+a Toplevel around `overrideredirect()` evidently does not behave safely
+across every real Windows/Tk configuration, breaking popup visibility
+outright rather than just fixing the flash. Reverted `Popup.__init__`
+back to its exact pre-v22.2.7 form - confirmed zero remaining
+`withdraw()`/`deiconify()` calls in the file.
+
+The original title-bar-flash issue is unfixed again as of this version -
+a minor cosmetic issue, clearly the better trade against fully broken
+popups. A different approach was discussed for revisiting it later:
+`VideoPopup` already tucks itself into a 2x2px screen corner while waiting
+for mpv to actually start rendering, then reveals its real position after
+a fixed delay - the same technique (position off in a corner instead of
+toggling window visibility) could plausibly hide the title-bar flash too,
+without touching withdraw/deiconify at all. Not attempted this patch;
+flagged for a future, more cautious attempt.
+
+Version bumped to v22.2.8.
+
+## 36. v22.2.9 - image popups now log filename, corruption level, and screen position
+
+Requested directly, in service of an ongoing investigation into a report of
+images not appearing: a re-test on v22.2.8 (which reverted the v22.2.7
+title-bar-flash regression) still showed no image popups, even though the
+known desktop-icon shortcut failure was confirmed correctly handled as
+non-fatal this time (the log showed "continuing with the rest of startup"
+right where expected). That rules out the desktop-icon crash as the actual
+cause here - something else is still preventing images specifically, still
+undiagnosed.
+
+Added a log line to `features/image_popup.py`, right after geometry is
+computed, so this is settled by data on the next run rather than another
+guess:
+
+```
+Image popup: "example_pic.jpg" (corruption level 2) at (340, 812), monitor \\.\DISPLAY1
+```
+
+Zero of these lines on a run where images should have appeared would point
+upstream (media selection, mood filtering, or the roll never succeeding);
+seeing them but nothing visibly appearing would point at a rendering/
+display problem after selection - a very different, much narrower place to
+look next.
+
+Version bumped to v22.2.9.
