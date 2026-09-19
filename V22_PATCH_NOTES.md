@@ -1336,3 +1336,427 @@ display problem after selection - a very different, much narrower place to
 look next.
 
 Version bumped to v22.2.9.
+
+## 37. v22.2.10 - README replaced with an updated version
+
+The person provided a revised `README.md` directly (refined installation
+instructions, an expanded Do Not Press description, a new Content Removal
+Policy section, and reworded "biggest changes" bullets) to replace the
+existing one. The provided version's changelog didn't yet include the
+v22.2.0 through v22.2.9 entries already in the repo's README - spliced
+those back into the versioned list in their existing newest-to-oldest
+position rather than silently dropping them, while keeping everything else
+in the provided file (including its own edited "biggest changes" summary)
+exactly as given.
+
+No code changes this version - documentation only.
+
+Version bumped to v22.2.10.
+
+## 38. v22.2.11 - candidate fix for the video-popup window flash, isolated on its own this time
+
+A different attempt at a report that's come up twice now: a brief flash of
+a window with a native title bar before a video popup properly appears.
+The first attempt (v22.2.7) touched `Popup.__init__`'s window
+visibility/borderless timing and had to be reverted in v22.2.8 - it broke
+image and video popups entirely, an unverifiable-from-this-sandbox Windows
+behavior that turned out worse than the cosmetic issue it was meant to fix.
+
+New details from a second report narrowed this down to something
+different: the flash is a fairly large window, roughly the same size each
+time, but not always in the same position. That doesn't match the popup's
+own window (which would vary in *size* to match each video, not stay
+consistent) - it matches mpv's own window, which can briefly appear during
+its GPU/render-context initialization before python-mpv's `wid` embedding
+fully takes hold, independent of anything the Tkinter side does.
+
+Added `"border": "no"` to `VideoPlayer`'s shared mpv properties dict
+(`features/video_player.py`) - mpv's own documented option to suppress its
+own window decorations, used by both the direct-embed and subprocess mpv
+paths since they share this properties dict. Deliberately does not touch
+`Popup.__init__` or anything reverted in v22.2.8 - a completely separate
+code path, so it can't interact with or reintroduce that regression.
+
+Same honesty as before: this is not visually verified. GPU-level window
+creation timing inside a separate subprocess is, if anything, less
+observable from this sandbox than the last attempt was. Shipped on its own,
+deliberately not bundled with anything else, specifically so it's easy to
+test in isolation and easy to revert on its own if it doesn't help.
+
+Version bumped to v22.2.11.
+
+## 39. v22.2.12 - third attempt at the video-popup window flash, targeting the subprocess launch itself
+
+Two earlier attempts at this same report didn't hold up: v22.2.7's Tkinter
+window-visibility-timing fix broke image and video popups entirely and had
+to be reverted (v22.2.8); v22.2.11's mpv `border: no` property shipped and
+was confirmed to have made no difference.
+
+That second result was itself useful data - it means mpv very likely isn't
+creating an independent window at all, ruling that mechanism out. Re-
+examined `VideoPopup._finish_init()`'s corner-tuck sequence directly and
+tested whether packing `VideoPlayer`'s Label (at its full real size) into
+the already-2x2-sized window could be overriding that geometry back to a
+large size - directly testable in this sandbox, since it's pure Tkinter
+geometry management, not GPU/subprocess timing. Disproven: the window
+stayed at 2x2 after packing, in a controlled test.
+
+Reconsidered the description once more - a large, roughly consistent-sized
+window with Windows' plain default title bar, in a varying position,
+specifically before video popups (the only popup type that spawns a
+subprocess at all in the default `mpvSubprocess=1` mode) - and found the
+mpv subprocess launch (`subprocess.Popen(...)` in `features/video_player.py`)
+had no `creationflags` set at all. Spawning a new Python process on Windows
+without `CREATE_NO_WINDOW` can briefly flash a plain console window -
+default black background, default title bar, a fixed size independent of
+whatever's being rendered - before anything suppresses it. This is a
+well-established, previously-solved class of problem, unlike the more
+novel territory of the first two attempts.
+
+Fixed: `creationflags=subprocess.CREATE_NO_WINDOW if os_utils.is_windows()
+else 0` added to that Popen call. Verified the platform guard is load-
+bearing, not decorative - `subprocess.CREATE_NO_WINDOW` genuinely doesn't
+exist outside Windows, confirmed directly, so referencing it unconditionally
+would crash on any non-Windows run.
+
+A completely separate code path from both earlier attempts - can't
+interact with the reverted v22.2.7/v22.2.8 code or the v22.2.11 mpv
+property at all. Shipped on its own again, for the same reason: easy to
+isolate, easy to revert independently if it doesn't help. Still not
+visually verified - that requires a real Windows run.
+
+Version bumped to v22.2.12.
+
+## 40. v22.2.13 - fourth attempt at the video-popup window flash, this time targeting the Windows compositor directly
+
+A frame-by-frame screen capture settled a real ambiguity in this report:
+the flashing window is a *distinct* window from the video popup itself
+(confirmed appearing several frames before the video's own content shows),
+and critically, it's not a solid window at all - just a blue border/outline
+with a fully transparent interior, other windows (File Explorer, in the
+capture) visible straight through it.
+
+That description doesn't match either of the two mechanisms tried so far
+(mpv's own window - ruled out already by `border: no` making no
+difference; a plain console-window flash from the subprocess launch -
+would be solid black, not transparent) and matches a well-documented
+Windows DWM (compositor) behavior instead: DWM can draw a window's
+creation/resize *transition* (an outline/chrome) before the window's
+actual content has been composited, so the still-unpainted client area
+shows whatever's behind it straight through.
+
+Fixed via `DWMWA_TRANSITIONS_FORCEDISABLED` (a real `DwmSetWindowAttribute`
+call, value 3), added inside `set_borderless()` in `os_utils/windows.py` -
+covers every popup type the same way borderless already does, since it's
+the same shared hook. Deliberately does not touch `Popup.__init__`,
+`VideoPopup`, or anything from either of the first two attempts - a fourth,
+still fully independent code path. Wrapped in try/except that logs and
+moves on on failure, specifically so a compositor-API failure can never
+break popup creation itself - the exact mistake the very first attempt
+(v22.2.7, reverted in v22.2.8) made.
+
+Still not visually verified - real Windows DWM behavior isn't something
+this sandbox can observe - but this is the best-supported of the four
+attempts so far, targeting the actual OS-level mechanism the symptom
+describes rather than a plausible-sounding guess.
+
+Version bumped to v22.2.13.
+
+## 41. v22.2.14 - real bug: wait_visibility() could freeze the whole app, confirmed by a real crash report
+
+Reported directly, discovered while testing the "turn off mpvSubprocess"
+diagnostic for the video-flash investigation: with the spiral overlay
+enabled and mpvSubprocess off, the app showed the startup image and then
+nothing at all - no popups, no sound - until pressing Panic, at which point
+everything (popups, audio, and a bare, undecorated "tk"-titled window)
+suddenly appeared at once. Closing that bare window killed everything.
+
+The log traced this precisely: `SpiralOverlay.__init__`'s `wait_visibility()`
+call (added in v22.2.5 to fix a click-through timing bug) threw
+`TclError: window ".!spiraloverlay" was deleted before its visibility
+changed`. `safe_step` caught and logged it correctly, and Python execution
+did continue afterward (all ten image popups for that session were created
+and logged) - but nothing was actually reaching the screen until Panic was
+pressed, consistent with `wait_visibility()`'s nested Tcl event loop
+(`tkwait visibility`) leaving the wider event queue in a bad state when it
+exits abnormally, even once the exception itself is caught. The bare "tk"
+window with full default decoration is consistent with a Toplevel whose
+`overrideredirect` never got a chance to visually take effect before
+everything froze.
+
+`Popup.try_clickthrough()` (used by every popup type) had the exact same
+`wait_visibility()` pattern, just never yet hit by a report - fixed
+proactively rather than waiting for a second incident, given this class of
+call is now confirmed dangerous, not just theoretically risky.
+
+Fixed in both `features/spiral_overlay.py` and `features/popup.py`:
+replaced `wait_visibility()` with `update_idletasks()`, which forces the
+same pending window setup without entering a blocking, nested event loop
+that can throw or destabilize things. Verified directly: reproduced the
+exact failure condition from the report (destroying a window right before
+the call) - `wait_visibility()` throws in that case;
+`update_idletasks()` handles it cleanly, no exception, no hang.
+
+Separately: turning off "Use a separate video process" (mpvSubprocess),
+suggested as a diagnostic for the ongoing video-flash investigation, very
+likely contributed to destabilizing things further here - with it off,
+both the spiral overlay's GIF playback and any real video popup create
+their own in-process mpv core instance concurrently, a known source of
+instability for multiple mpv/GPU contexts sharing one process. That
+setting is best left on for normal use; it did not fix the video flash
+either (confirmed still present with it off), so there's no reason to
+trade away its crash-isolation benefit for it.
+
+Version bumped to v22.2.14.
+
+## 42. v22.2.15 - Scheduler actually works now
+
+Surfaced by direct questioning about how the feature was supposed to
+behave: `config.pyw`'s save flow never called the function that actually
+registers a Windows Task Scheduler entry - it saved the "Use a schedule"
+setting into config.json, but nothing at the OS level ever happened as a
+result, regardless of what it was set to. Confirmed the original v21
+config UI wires this up correctly (`config/window/utils.py` calls
+`os_utils.set_schedule()`/`delete_schedule()` conditioned on that same
+checkbox, on every save) - this is a real feature that got dropped when
+config.pyw was rebuilt from scratch, not something that was ever working
+the way it was documented.
+
+Also clarified (in conversation, not a code change) how the feature
+actually behaves, since it doesn't work the way it initially sounds like it
+would: Scheduler has nothing to do with delaying or pausing the current
+session - it registers a genuine Windows Task Scheduler task that launches
+Edgeware again at a future time, independent of whatever's happening right
+now. "Save, Exit, and Run" always launches immediately regardless of this
+setting; they're two unrelated actions. For "Repeat the schedule"
+specifically: the repeat check is purely "is a process from this task
+still running" (Windows Task Scheduler's own default `MultipleInstances`
+policy, `TASK_INSTANCES_IGNORE_NEW`, confirmed by checking that this task
+definition never overrides it) - it has nothing to do with corruption
+levels or any Edgeware-internal concept of a session "finishing", since
+Edgeware itself has no such concept either: the popup loop runs forever
+once started, until something external (Panic, closing the process) stops
+it.
+
+Fixed: added `apply_schedule(cfg)` to config.pyw, mirroring
+`apply_startup_toggle()`'s existing lazy-import/DLL-directory pattern
+(`os_utils.windows` needs the same libmpv-findable setup, for the same
+unrelated-feature-bundled-in-that-file reason), since `os_utils.set_schedule()`
+expects a "vars" object of real Tkinter Variables (built for the original
+UI) rather than config.pyw's plain dict - a small `_ScheduleValue`
+adapter (just enough of a `.get()` interface to satisfy it) bridges the two
+without changing `set_schedule()` itself, so the original UI's own call
+site is completely unaffected. Wired into `save()` alongside the existing
+`apply_startup_toggle()` call. Verified directly with mocked `os_utils`:
+schedule-on correctly calls `set_schedule()` with every value correctly
+translated from the raw config dict; schedule-off correctly calls
+`delete_schedule()`.
+
+Also updated the "Use a schedule" row's description to state plainly what
+it does ("Automatically start Edgeware using Windows Task Scheduler"),
+now that it's actually true.
+
+Version bumped to v22.2.15.
+
+## 43. v22.2.16 - five fixes/additions from a batch of UI reports: theme background, corner mixup, a wrong description, trimmed wordy text, and a new "Adopt Pack Settings" button
+
+**1) Manager Appearance's content-area background wasn't updating.**
+Reported directly: switching between config.pyw's own visual themes left
+one background color stuck, sticking out against lighter themes like
+Original/Bimbo. Traced to `apply_manager_theme()`: it reconfigures the
+sidebar, canvas, and outer content frame on a theme change, but never
+`self.page` - the actual frame holding every setting row - which was only
+ever colored once, at initial creation. Fixed: `self.page` is now
+reconfigured in the same place as everything else. Verified directly:
+switching themes now produces the correct panel color for `self.page`.
+
+**2) Low-key corner mixup - Top-Right and Top-Left were swapped.**
+Reported and confirmed exactly: selecting "Top-Right" placed the popup at
+top-left and vice versa; bottom corners were unaffected, matching the
+report precisely. Root cause: `features/popup.py`'s actual placement logic
+treats index 0 as top-*right* and index 1 as top-*left*, but config.pyw's
+own label-to-index mapping (independently duplicated in five places -
+`raw_value()`, two `collect()`-time dicts, and `corner_changed()`) had them
+backwards, all self-consistently, so it never surfaced as an internal
+contradiction, just a mismatch against the engine. Fixed all five
+occurrences consistently. Verified directly against the engine's own
+placement math: every label now produces the position it names.
+
+**3) "Corruption purity mode"'s description was simply wrong.** It claimed
+to "restrict which moods can be used," describing a feature that isn't
+what this does at all. Investigated directly, and the person's own guess
+turned out to be exactly right: `handle_corruption()` sets the starting
+level to the pack's highest when this is on, and `next_corruption_level()`
+counts down from there instead of up - it runs the whole corruption
+sequence in reverse. Description corrected to say that.
+
+**4) Trimmed every setting description over 40 words.** Scanned all 95
+rows across the tool; four exceeded it (Full-Screen Spiral + Binaural
+Audio, Image resize quality, Priority, Sites to search) - all four
+shortened while keeping the essential meaning intact. Re-scanned after:
+zero remaining over the limit.
+
+**5) New "Adopt Pack Settings" button**, on the Start page under Priority.
+Copies whatever settings the currently selected pack specifies in its own
+`config.json` into the person's own saved settings (a Save afterward is
+what persists it to disk, same as any other change here) - useful for
+"baking in" a pack's tuned values as your own baseline, so they stick even
+under Default Priority or with a different pack selected later. Shows a
+confirmation naming how many settings will be copied before doing anything,
+and a plain message instead of an empty confirmation if the selected pack
+doesn't specify anything of its own. Verified directly: the empty-pack case
+shows the info message and touches nothing; the populated case correctly
+overwrites only the pack's specified keys, leaving everything else in the
+saved config untouched.
+
+Version bumped to v22.2.16.
+
+## 44. v22.2.17 - a batch of five: Panic Lockout topmost fix, scheduled-task "Open With" prompt fix, hibernate/spiral/binaural sync fixes, and a new tray-icon Panic toggle
+
+Five things this patch, from a single round of reports:
+
+**1) New: "Hide Panic from the tray icon."** Asked directly: is there a way
+to remove just the tray icon's Panic entry while leaving the keyboard
+shortcut fully working? There wasn't - the closest existing setting
+("Disable emergency stop") turned out to be a single shared gate inside
+`panic()` that every trigger (keypress, tray menu, and the external
+`panic.pyw` signal) passes through alike, confirmed by tracing the code -
+not scoped to the tray icon at all, and not what was actually wanted.
+Added a new, narrower setting (`hideTrayPanic`) that does exactly the
+requested thing: `make_tray_icon()` simply omits the Panic menu item
+entirely when it's on, with the keyboard shortcut completely unaffected.
+Placed directly under "Disable emergency stop" in config.pyw. Verified
+directly: menu list is empty with the setting on, contains Panic with it
+off.
+
+**2) Real bug: Panic Lockout's password prompt could get buried under
+Edgeware's own popups, with no way to reach it.** The built-in
+`simpledialog.askstring()` never sets `-topmost` at all, so it could lose
+the z-order race to Edgeware's own topmost popups almost immediately -
+and since it also performs a keyboard/mouse grab internally, input kept
+routing to a dialog that was no longer visible, effectively locking
+someone out with no way to see what they were typing into. Replaced with a
+custom dialog (`ask_panic_password()` in panic.py) that stays topmost and
+actively reclaims focus on every tick - deliberately different from the
+passive-overlay re-lift pattern used elsewhere in this codebase (spiral
+overlay, subliminal popup), since this one genuinely needs to be typed
+into right now, not left alone. Verified directly with simulated typing:
+password captured correctly, topmost confirmed true across multiple
+re-lift ticks. Caught and fixed a real bug in the new dialog itself during
+testing - an invalid widget constructor argument that would have crashed
+it immediately.
+
+**3) Real bug: Scheduler's scheduled task showed Windows' "How do you want
+to open this file?" prompt every time it ran.** Traced to
+`os_utils.set_schedule()`: the task's action was pointed directly at the
+`.pyw` file itself as if it were the program to run. A `.pyw` file isn't
+an executable, so Windows Task Scheduler fell back to file-association
+resolution - the same mechanism a double-click uses - to figure out how to
+open it, surfacing that exact prompt. Fixed: the action now launches the
+real Python interpreter directly, with the `.pyw` file passed as an
+argument (the same approach the `.pyw` launcher stubs themselves already
+use), bypassing that resolution step entirely.
+
+**4) Real bug: the spiral overlay and binaural audio started immediately
+at launch, regardless of Hibernate mode - running under what was supposed
+to be total silence before the first wake-up.** Both were being started
+unconditionally in `start_main()`, before the branch that checks
+`settings.hibernate_mode` at all. Fixed: when hibernating, they're now
+started from inside `start_main_hibernate()` instead, using the exact same
+randomly-computed delay as the first wake-up (computed once and shared,
+rather than each rolling its own independent random delay and drifting out
+of sync) - so they fade in together with the first burst rather than
+running the whole silent wait beforehand. `hibernate()` gained an optional
+pre-computed `delay` parameter to support this without duplicating the
+randomness or affecting its normal repeated-cycle behavior.
+
+**5) Real bug, separate from #4: Panic never stopped the spiral overlay or
+binaural audio at all**, reported via a related but distinct symptom
+(after using the tray icon's "Skip to Hibernate," Panic correctly stopped
+tracked popups and closed the tray icon, but images/audio/the spiral kept
+running). Root cause: neither was ever tracked anywhere `panic()`'s
+cleanup loop could reach - the spiral overlay isn't a one-shot popup
+(so never went into `state.popups`), and the binaural player was
+deliberately kept out of `state.audio_players` from the start (so it would
+never compete with real pack audio for a `max_audio` slot) - with the side
+effect that nothing was left to close it either. Added `state.spiral_overlays`
+and `state.binaural_overlay` tracking (populated wherever either one gets
+started, hibernating or not), and `panic()` now closes both - each already
+had a working `close()` method from when they were originally built, they
+just were never being called.
+
+Version bumped to v22.2.17.
+
+## 45. v22.2.18 - tray icon actually disappears now, and a real race condition in Panic's cleanup fixed
+
+Two fixes, both from direct reports on the previous patch:
+
+**1) "Hide Panic from the tray icon" now actually hides the icon.** The
+v22.2.17 version only removed the Panic entry from the tray menu - the
+icon itself stayed, either with an empty menu or with "Skip to Hibernate"
+still present when Hibernate was active, since that item was added
+regardless of the new setting. Reported directly, exactly matching the
+intent gap: the icon being present and doing *something* on click doesn't
+actually achieve "Panic can only be triggered by the keyboard shortcut."
+Fixed: `make_tray_icon()` now skips creating the icon entirely when the
+setting is on, hibernate active or not. `panic()`'s cleanup, which
+unconditionally called `state.tray.stop()`, was guarded to handle
+`state.tray` legitimately being `None` now.
+
+**2) Real bug, a genuine race condition: Panic's cleanup loop could abort
+partway through, leaving some popups (and audio) still running.** Reported
+via a specific reproduction: short hibernate test intervals causing
+overlapping bursts of popups, where pressing the keyboard Panic shortcut
+afterward didn't clear everything - a second attempt via the external
+`panic.pyw` signal was needed to finish the job. Traced to
+`Popup.close()`: it called `state.popups.remove(self)` unconditionally,
+which raises `ValueError` if the popup already removed itself (its own
+natural close - a timeout, a click - happening at nearly the same moment
+Panic's cleanup loop reaches it in its own separately-taken snapshot of
+`state.popups`). That exception aborted the entire `for popup in
+state.popups.copy(): popup.close()` loop in `do_panic()` right where it
+was raised - every popup after it in the loop, plus the final
+`pyglet.app.exit()`/`root.destroy()` that come after the loop, never ran.
+A fast, overlapping burst of popups (exactly the reported test setup)
+makes this race meaningfully more likely to hit than normal spaced-out
+popups would. Fixed: `close()` is now idempotent - if the popup isn't in
+`state.popups` anymore, it's already been closed, and calling it a second
+time is a safe no-op rather than a crash. Verified directly by simulating
+the exact race (a popup closing itself right before Panic's loop reaches
+it in its snapshot): the loop now completes in full and everything gets
+cleared correctly.
+
+Version bumped to v22.2.18.
+
+## 46. v22.2.19 - "Fade in/out time" only ever affected audio, description was misleading; README changelog and testing gaps
+
+Asked directly: how does "Fade in time (ms)"/"Fade out time (ms)" interact
+with "Automatic close time (sec)"? Traced both: they don't interact at
+all, and the fade duration settings' description was actively misleading.
+`fadeInDuration`/`fadeOutDuration` are used exclusively in
+`features/audio.py`, fading an audio popup's volume in/out - never
+referenced anywhere in image/video popup code. "Automatic close time"
+triggers a completely separate, hardcoded visual fade in
+`try_timeout()` (~1.5 seconds, fixed, not adjustable via either duration
+setting) that has nothing to do with the ms settings at all. The old
+label/description said "How long popups take to appear/disappear,"
+implying general popup behavior - fixed to "Audio fade-in/out time," with
+the description now stating plainly that image/video popups aren't
+affected.
+
+Also this version: the README's changelog (all 28 versioned entries and
+all 5 "biggest changes" bullets) rewritten to 20 words or less each, per
+request - verified by direct word count, zero remaining over the limit.
+Future changelog entries should follow the same 20-word limit going
+forward. Added a new "Not Yet Verified" section above the changelog,
+listing real features that exist in the code but haven't been specifically
+tested this round (Fill Drive, Do Not Press's full session flow, the
+danger/pack-permission gate, Mitosis Mode, prompt popups, web popups,
+moving popups, wallpaper rotation/cycling, Discord Rich Presence,
+multi-click closing, Mood Set, and popup auto-close/fade timing itself) -
+each bullet kept to 10 words or less, also verified by count. Fill Drive
+was flagged as the highest priority to verify given its behavior (copies
+pack images across the entire configured drive path) is genuinely
+destructive if anything about it doesn't work as intended.
+
+Version bumped to v22.2.19.

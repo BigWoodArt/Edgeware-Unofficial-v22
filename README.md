@@ -87,65 +87,91 @@ Edgeware++ (as of April 28, 2025) is licensed under GPLv3 or later. Contribution
 to that date are licensed under MIT. This fork retains the same license.
 
 
+## Not Yet Verified
+
+Things that exist in the code but haven't been specifically tested this round -
+worth a look before relying on them:
+
+* Fill Drive - copies pack images across your entire drive.
+* Do Not Press - full armed session flow never run.
+* Danger/pack-permission gate - untested whether limits are enforced.
+* Mitosis Mode (duplicate popups) - active, not confirmed working.
+* Prompt popups - typing challenges, mistake lockout untested.
+* Web popups - opening links on close, untested.
+* Moving popups - active, not confirmed working correctly.
+* Wallpaper rotation and Corruption Wallpaper/Theme Cycle - untested.
+* Discord Rich Presence - never mentioned or tested at all.
+* Multi-click closing, Mood Set toggle - both active, unconfirmed.
+* Popup auto-close/fade timing - worth re-confirming visually.
+
+
 ## Changelog
 
 Roughly newest to oldest. This is a summary - see
 [V22_PATCH_NOTES.md](V22_PATCH_NOTES.md) if you want the full blow-by-blow.
+Entries are kept to 20 words or less.
 
 **The biggest changes, regardless of version number:**
-* Animated WebP images no longer show up as a black square - ffmpeg/mpv genuinely cannot
-decode them at all, so they're now played back natively instead of being handed to mpv.
-* A real, from-scratch scraper built for the Gelbooru-engine family of sites (Gelbooru,
-Rule34, Safebooru, and others sharing that JSON API), plus a "Test Download Sites" tool
-in config.pyw that checks all 18 known sites against your real settings and shows exactly
-which work, which don't, and why.
-* `config.pyw` rebuilt from the ground up to give clear, full control over the pack runs.
-* A pack's own settings (under Pack Priority) were being silently wiped out the instant
-corruption's first level applied - fixed.
-* New optional full-screen spiral overlay with a paired binaural audio layer - both react
-live to session intensity (spiral/subliminal chance, message frequency, popup speed) and
-ease gradually as corruption escalates rather than jumping, with hard caps on both
-(opacity capped at 50%, audio volume capped at a gentle 15-35%) so neither can take over
-the screen or ears.
+* Animated WebP images no longer show as a black square - now played back natively instead of via mpv.
+* Real scraper built for Gelbooru-family sites, plus a tool that tests all 18 known sites and shows why any fail.
+* `config.pyw` rebuilt from the ground up for clear, full control over pack runs.
+* A pack's own settings under Pack Priority were silently wiped out at corruption's first level - fixed.
+* New optional full-screen spiral overlay with paired binaural audio, reacting to session intensity with hard opacity/volume caps.
 
-**v22.1.0** - Real scraper built for the Gelbooru-engine family of sites.
-The other 3 site families are
-shown dimmed in the checklist as a "not rebuilt yet" reminder - still
-clickable, not locked. 
+**v22.2.19** - Fixed misleading fade-time description (audio only, not popups). Rewrote changelog to 20 words or less. Added untested-features list.
 
-**v22.0.11** - Video popups freezing every click on-screen, especially in
-video-heavy packs, while a video's size was being read - fixed by moving
-that off the main thread. Online image downloads expanded from a hardcoded
-single site (Gelbooru) to a checkbox list of ~18 sites.
+**v22.2.18** - Tray icon now fully hides with Panic disabled, not just its menu. Fixed a Panic cleanup race that skipped popups.
 
-**v22.0.8** - Edgeware wouldn't start at all on newer Python, due to the DLL-loading
-issue above.
+**v22.2.17** - New setting hides Panic from the tray icon. Fixed Panic Lockout's buried prompt, Scheduler's open-with prompt, and hibernate timing bugs.
 
-**v22.0.7** - Pack Priority's settings were silently reverting moments after startup -
-not just one setting, every setting a pack overrides.
+**v22.2.16** - Five UI fixes: stuck theme color, swapped Low-key corners, wrong Purity description, trimmed text, new Adopt Pack Settings button.
 
-**v22.0.6** - Disabled/grayed-out settings weren't actually reading as disabled (text
-too light, dropdowns and text boxes ignoring the theme).
+**v22.2.15** - Scheduler now actually works - config.pyw never registered the Windows Task Scheduler entry, so it silently did nothing before.
 
-**v22.0.5** - The real fix for settings appearing to revert when switching tabs
-(previously only fixed at save time, not while actively editing). Removed a blocking
-confirmation dialog that could hang Edgeware forever during an unattended Do Not Press
-session. Intensity presets rewritten with clean integer values throughout. Settings that
-only matter when a "parent" setting is on now gray out automatically.
+**v22.2.14** - Fixed a real freeze - a blocking Tk call could crash and leave the app stuck until Panic was pressed.
 
-**v22.0.4** - Found and fixed the actual Priority bug: Default Priority wasn't being
-honored at all, due to a string-comparison mismatch. Removed 5 settings confirmed to
-have no effect on Edgeware's runtime. README replaced.
+**v22.2.13** - Fourth attempt at the video-flash bug, targeting Windows' compositor directly. Best-supported attempt yet, still not visually confirmed.
 
-**v22.0.3** - Pack-selection summary text no longer overflows and pushes buttons
-off-screen. Priority dropdown updates live instead of needing a save first.
+**v22.2.12** - Third attempt at the video-flash bug - a missing flag let Windows briefly flash a console window on launch.
 
-**v22.0.2** - Added Do Not Press. Introduced the Priority system (your settings vs. a
-pack's own). Fixed a crash-on-launch bug in config.pyw.
+**v22.2.11** - Second attempt at the video-flash bug, this time targeting mpv's own window instead of Tkinter's.
 
-**v22.0.1 and earlier** - Fixed the animated WebP black square and related lag. Fixed a
-fatal Python syntax error in `panic.py` that could crash Panic outright. Fixed popups
-appearing behind other windows. Panic now auto-captures your wallpaper automatically,
-and no longer goes black if the captured file gets overwritten later. Fixed "Run when
-Windows starts" being cosmetic-only. `config.pyw` rebuilt with WebP⇄GIF conversion
-tools, intensity presets, and pack override visibility.
+**v22.2.9** - Image popups now log their filename, corruption level, and screen position, to help debug a missing-images report.
+
+**v22.2.8** - Reverted v22.2.7's video-flash fix - it broke image and video popups entirely. Everything else from that version stays.
+
+**v22.2.7** - Setup script now checks Python version and warns properly. Fixed a video flash. Image resizing now defaults to Bilinear.
+
+**v22.2.6** - Fixed subliminal text and notifications wrongly borrowing captions when empty. Fixed a wrong "denial" description. Added a new Hypnotics tab.
+
+**v22.2.5** - Real bug: the spiral overlay was blocking clicks instead of passing them through. Now fixed.
+
+**v22.2.4** - Fixed "Test Download Sites" misreporting some working sites as failing. Traced (but didn't fix) why Paheal always fails.
+
+**v22.2.3** - Spiral overlay opacity now tracks corruption live instead of staying fixed. Added paired binaural audio. Subliminal text stays on top.
+
+**v22.2.2** - Subliminal text no longer gets buried by later popups. Added a booru site tester and an optional spiral overlay.
+
+**v22.2.1** - Real bug: one failed startup step (a desktop shortcut) could silently kill Panic and every popup. Now isolated and logged.
+
+**v22.2.0** - Original v21 config menu restored as `config_original.pyw`. Fixed its update check pointing at the wrong repo.
+
+**v22.1.0** - Real scraper built for the Gelbooru-engine site family. Other engines stay dimmed as "not rebuilt yet."
+
+**v22.0.11** - Fixed video popups freezing every click while reading video size. Booru downloads expanded from one site to ~18.
+
+**v22.0.8** - Edgeware wouldn't start at all on newer Python, due to a DLL-loading issue - fixed.
+
+**v22.0.7** - Pack Priority's settings were silently reverting moments after startup - every setting a pack overrides, not just one.
+
+**v22.0.6** - Disabled/grayed-out settings weren't actually reading as disabled - text too light, widgets ignoring the theme.
+
+**v22.0.5** - Real fix for settings reverting when switching tabs. Removed a dialog that could hang unattended sessions. Dependent settings now auto-gray.
+
+**v22.0.4** - Fixed Default Priority not being honored at all, due to a string-comparison bug. Removed 5 dead settings.
+
+**v22.0.3** - Pack-selection text no longer overflows and pushes buttons off-screen. Priority dropdown now updates live.
+
+**v22.0.2** - Added Do Not Press and the Priority system (your settings vs. a pack's own). Fixed a launch crash.
+
+**v22.0.1 and earlier** - Fixed WebP lag, a Panic-crashing syntax error, and popups appearing behind windows. Rebuilt config.pyw with conversion tools and presets.

@@ -22,8 +22,10 @@ from threading import Thread
 from tkinter import Tk
 
 from config.settings import Settings
+from features.binaural_overlay import handle_binaural_overlay
 from features.drive import fill_drive
 from features.misc import handle_wallpaper
+from features.spiral_overlay import handle_spiral_overlay
 from pack import Pack
 from panic import restore_panic_wallpaper
 from roll import RollTarget, roll_targets
@@ -103,8 +105,9 @@ def activity_loop(
     activity(root, settings, targets, lambda: run)
 
 
-def hibernate(root: Tk, settings: Settings, pack: Pack, state: State, targets: list[RollTarget]) -> None:
-    delay = random.randint(settings.hibernate_delay_min, settings.hibernate_delay_max)
+def hibernate(root: Tk, settings: Settings, pack: Pack, state: State, targets: list[RollTarget], delay: int | None = None) -> None:
+    if delay is None:
+        delay = random.randint(settings.hibernate_delay_min, settings.hibernate_delay_max)
     state.hibernate_id = root.after(delay, lambda: main_hibernate(root, settings, pack, state, targets))
 
 
@@ -149,4 +152,17 @@ def start_main_hibernate(root: Tk, settings: Settings, pack: Pack, state: State,
     state._popup_number.attach(observer)
     state._hibernate_active.attach(observer)
 
-    hibernate(root, settings, pack, state, targets)
+    # The spiral/binaural overlay are ambient layers meant to reflect an
+    # active session, not run underneath total silence - reported directly:
+    # they were starting immediately, before hibernate's first wake-up, since
+    # main_edgeware.py used to start them unconditionally regardless of
+    # hibernate mode. Now started here instead, once, in sync with the exact
+    # same delay as the first wake-up (computed once and reused for both,
+    # rather than each independently rolling its own random delay and
+    # drifting apart) - they fade in together with the first burst, then run
+    # continuously afterward as before, not restarted on later cycles.
+    delay = random.randint(settings.hibernate_delay_min, settings.hibernate_delay_max)
+    root.after(delay, lambda: state.__setattr__("spiral_overlays", handle_spiral_overlay(root, settings, pack)))
+    root.after(delay, lambda: state.__setattr__("binaural_overlay", handle_binaural_overlay(root, settings, pack)))
+
+    hibernate(root, settings, pack, state, targets, delay=delay)

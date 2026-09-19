@@ -20,6 +20,7 @@ import datetime
 import logging
 import os
 import subprocess
+import sys
 import tempfile
 from ctypes import windll
 from pathlib import Path
@@ -35,6 +36,8 @@ PYW = {
     Process.PANIC: PATH / "panic.pyw",
 }
 
+DWMWA_TRANSITIONS_FORCEDISABLED = 3
+
 
 def close_mpv(player: mpv.MPV) -> None:
     player.terminate()
@@ -42,6 +45,33 @@ def close_mpv(player: mpv.MPV) -> None:
 
 def set_borderless(window: Toplevel) -> None:
     window.overrideredirect(True)
+    _disable_dwm_transitions(window)
+
+
+def _disable_dwm_transitions(window: Toplevel) -> None:
+    # A third attempt at a real, twice-narrowed-down report: a brief,
+    # transparent, blue-bordered window - just an outline, desktop/other
+    # windows visible straight through it - appearing right before a video
+    # popup's real content is ready, confirmed via frame capture to be a
+    # distinct window from the popup itself. That's a known Windows DWM
+    # (compositor) behavior: it can draw a window's creation/resize
+    # transition (an outline/chrome) before the window's actual content has
+    # been composited, so the still-unpainted client area shows whatever is
+    # behind it. DWMWA_TRANSITIONS_FORCEDISABLED tells DWM to skip that
+    # transition for this window entirely - a genuine Windows compositor
+    # API, distinct in kind from both earlier attempts at this same report
+    # (Tkinter's own withdraw/deiconify visibility timing, which broke
+    # popups outright and was reverted in v22.2.8; and mpv's own window
+    # property plus its subprocess launch flag, neither of which turned out
+    # to be the actual cause). Best-effort and silently ignored on failure -
+    # this is a cosmetic mitigation, never worth risking popup creation
+    # itself over, which is exactly the mistake the first attempt made.
+    try:
+        hwnd = windll.user32.GetParent(window.winfo_id())
+        value = ctypes.c_int(1)
+        windll.dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, ctypes.byref(value), ctypes.sizeof(value))
+    except Exception as e:
+        logging.warning(f"Failed to disable DWM window transitions: {e}")
 
 
 def set_clickthrough(window: Toplevel) -> None:
@@ -177,8 +207,17 @@ def set_schedule(vars) -> None:  # noqa: ANN001
     task_action_exec = 0
     action = task_def.Actions.Create(task_action_exec)
     action.ID = "EDGEWARE"
-    action.Path = str(PYW[Process.MAIN])
-    # action.Arguments is to be used if cmdline is needed
+    # A .pyw file isn't itself an executable - pointing Task Scheduler's
+    # action.Path directly at it makes Windows fall back to file-association
+    # resolution to figure out how to open it, the same mechanism that
+    # decides what happens on a double-click. Reported directly: this shows
+    # Windows' "How do you want to open this file?" chooser every time the
+    # scheduled task actually runs. Launching the real interpreter directly,
+    # with the .pyw file passed as an argument, avoids that resolution step
+    # entirely - the same approach edgeware.pyw's own stub already uses
+    # (subprocess.run([sys.executable, ...])) to launch a script.
+    action.Path = sys.executable
+    action.Arguments = f'"{PYW[Process.MAIN]}"'
 
     # Set parameters
     task_def.RegistrationInfo.Description = "Edgeware++"

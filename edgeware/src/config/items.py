@@ -173,6 +173,7 @@ CONFIG_ITEMS = {
     "replace_threshold": Item("replaceThresh", NONNEGATIVE, IntVar, int, block=BROKEN),
     "drive_path": Item("drivePath", STRING, StringVar, str, block=True),  # We can't know what paths exist and they look different on Linux and Windows
     "panic_disabled": Item("panicDisabled", BOOLEAN, BooleanVar, bool, danger=Danger(DangerLevel.MINOR, Schema(1), PANIC_DISABLED_DANGER)),
+    "hide_tray_panic": Item("hideTrayPanic", BOOLEAN, BooleanVar, bool),
     "run_at_startup": Item("start_on_logon", BOOLEAN, BooleanVar, None, danger=Danger(DangerLevel.MAJOR, Schema(1), RUN_AT_STARTUP_DANGER), block=True),
     "show_on_discord": Item("showDiscord", BOOLEAN, BooleanVar, bool, danger=Danger(DangerLevel.MEDIUM, Schema(1), SHOW_ON_DISCORD_DANGER), block=BROKEN),
 

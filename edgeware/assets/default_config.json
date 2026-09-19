@@ -21,6 +21,7 @@
   "showCaptions": 0,
   "panicButton": "e",
   "panicDisabled": 0,
+  "hideTrayPanic": 0,
   "promptMistakes": 3,
   "mitosisMode": 0,
   "webPopup": 0,

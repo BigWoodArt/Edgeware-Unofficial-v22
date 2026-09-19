@@ -41,6 +41,19 @@ class VideoPlayer(Label):
             "loop": "inf",
             "hwdec": "auto" if self.settings.video_hardware_acceleration else "no",
             "input-cursor-passthrough": "yes",  # Required for buttonless closing
+            # A candidate fix for a reported brief flash of a window with a
+            # native title bar before a video popup properly appears -
+            # consistent large size regardless of varying position pointed
+            # at mpv's own window (created during its GPU/render context
+            # init, before it's fully embedded into the given wid), not the
+            # Tkinter popup window itself (which was already ruled out - see
+            # the reverted v22.2.7 attempt at this same report). This is
+            # mpv's own documented "no window border" option, independent of
+            # anything Tkinter/Windows-window-manager related, so it can't
+            # interact with that reverted code at all. Unverified here -
+            # GPU-level window creation timing inside a separate subprocess
+            # isn't something this sandbox can observe.
+            "border": "no",
         }
 
         if os_utils.is_linux():
@@ -77,6 +90,20 @@ class VideoPlayer(Label):
                     "1" if overlay else "0",
                 ],
                 stdin=subprocess.PIPE,
+                # Without this, spawning a new Python process on Windows can
+                # briefly flash a plain console window - default black
+                # background, default title bar - before anything suppresses
+                # it, independent of anything mpv or Tkinter itself is doing.
+                # Reported directly: a large, roughly consistent-sized window
+                # with Windows' default title bar, appearing briefly and in a
+                # varying position, specifically before video popups (the
+                # only popup type that spawns this subprocess at all). Two
+                # earlier attempts at this report (mpv's own render-context
+                # window, and Tkinter's own borderless-timing) were both
+                # ruled out - this targets the subprocess launch itself
+                # instead, a well-established fix for exactly this class of
+                # flash. CREATE_NO_WINDOW only exists on Windows.
+                creationflags=subprocess.CREATE_NO_WINDOW if os_utils.is_windows() else 0,
             )
 
             if overlay:

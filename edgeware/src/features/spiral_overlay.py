@@ -48,6 +48,7 @@ from config.settings import Settings
 from features.video_player import VideoPlayer
 from pack import Pack
 from paths import Assets
+from screeninfo import Monitor
 
 # Keys match the "spiralOverlayAsset" choices in config/items.py.
 SPIRAL_ASSETS = {
@@ -80,7 +81,7 @@ def resolve_spiral_asset(settings: Settings, pack: Pack) -> str:
 
 
 class SpiralOverlay(Toplevel):
-    def __init__(self, settings: Settings, monitor, asset: str) -> None:
+    def __init__(self, settings: Settings, monitor: Monitor, asset: str) -> None:
         super().__init__()
         self.settings = settings
         # Starts whatever hypno_chance already computes to right now (often
@@ -122,10 +123,15 @@ class SpiralOverlay(Toplevel):
         # the OS can silently fail to take effect, leaving an ordinary
         # (click-blocking) topmost window instead - which, for a persistent
         # full-screen window like this one, would mean it eats every click
-        # meant for a real popup underneath it. wait_visibility() blocks
-        # briefly, but this only runs once per monitor at startup, not per
-        # popup roll, so that cost is a non-issue here.
-        self.wait_visibility()
+        # meant for a real popup underneath it. update_idletasks() forces
+        # any pending geometry/mapping to process immediately, without
+        # entering a nested event loop the way wait_visibility() does - that
+        # was tried first, but confirmed directly (a real crash report) to
+        # be able to throw if the window gets destroyed while still waiting,
+        # and to leave the wider event queue in a bad state afterward even
+        # when the exception itself was caught. This has the same practical
+        # effect for this one-time-per-monitor call without that risk.
+        self.update_idletasks()
         os_utils.set_clickthrough(self)
 
         self._tick()
@@ -160,7 +166,7 @@ class SpiralOverlay(Toplevel):
             pass
 
 
-def handle_spiral_overlay(root: Tk, settings: Settings, pack: Pack) -> list[SpiralOverlay]:
+def handle_spiral_overlay(root: Tk, settings: Settings, pack: Pack) -> list[SpiralOverlay]:  # noqa: ARG001 - root kept for signature symmetry with the other safe_step-wrapped handlers in main_edgeware.py
     """Called once at startup, alongside the rest of start_main()'s
     independent feature setup - see the safe_step() wrapping in
     main_edgeware.py, so a failure here (e.g. no monitors detected, or a bad
@@ -180,5 +186,7 @@ def handle_spiral_overlay(root: Tk, settings: Settings, pack: Pack) -> list[Spir
         return []
 
     overlays = [SpiralOverlay(settings, monitor, asset) for monitor in monitors]
-    logging.info(f"Spiral overlay started on {len(overlays)} monitor(s), starting at {spiral_overlay_opacity(settings):.0%} opacity (tracks hypno chance live as it changes), using \"{settings.spiral_overlay_asset}\".")
+    logging.info(
+        f'Spiral overlay started on {len(overlays)} monitor(s), starting at {spiral_overlay_opacity(settings):.0%} opacity (tracks hypno chance live as it changes), using "{settings.spiral_overlay_asset}".'
+    )
     return overlays

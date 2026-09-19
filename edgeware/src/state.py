@@ -65,6 +65,9 @@ class State:
 
     tray: pystray.Icon | None = None
 
+    spiral_overlays: list = field(default_factory=list)
+    binaural_overlay = None
+
     keyboard_process: multiprocessing.Process | None = None
     alt_held = False
 

@@ -46,7 +46,7 @@ import shutil
 from multiprocessing.connection import Client, Listener
 from pathlib import Path
 from threading import Thread
-from tkinter import Tk, simpledialog
+from tkinter import Button, Entry, Label, TclError, Tk, Toplevel
 
 import pyglet
 from config.settings import Settings
@@ -59,6 +59,56 @@ ADDRESS = ("localhost", 6000)
 AUTHKEY = b"Edgeware++"
 PANIC_MESSAGE = "panic"
 
+RELIFT_INTERVAL_MS = 250
+
+
+def ask_panic_password(root: Tk) -> str | None:
+    """Same job as tkinter.simpledialog.askstring(), but explicitly kept
+    topmost - the built-in dialog never sets -topmost at all, so it can (and,
+    per a direct report, did) get buried under Edgeware's own topmost popups
+    almost immediately. Worse, its keyboard/mouse grab still routes all
+    input to the now-invisible dialog underneath everything else,
+    effectively locking the person out with no visible way to even see what
+    they're typing into. Unlike the passive overlays elsewhere in this
+    codebase that deliberately avoid stealing focus, this one is meant to be
+    typed into right now, so re-claiming focus on every tick is the correct
+    behavior here, not a disruption."""
+    dialog = Toplevel(root)
+    dialog.title("Panic")
+    dialog.attributes("-topmost", True)
+    dialog.resizable(False, False)
+    dialog.protocol("WM_DELETE_WINDOW", lambda: None)  # Only submitting (or Panic's own cleanup) should close this
+
+    result: dict[str, str | None] = {"value": None}
+
+    Label(dialog, text="Enter Panic Password").pack(padx=16, pady=(16, 4))
+    entry = Entry(dialog, show="*", width=30)
+    entry.pack(padx=16, pady=(0, 8))
+    entry.focus_set()
+
+    def submit(event: object = None) -> None:  # noqa: ARG001 - unused, but <Return> passes one and the Button doesn't, so it needs a default either way
+        result["value"] = entry.get()
+        dialog.destroy()
+
+    entry.bind("<Return>", submit)
+    Button(dialog, text="Submit", command=submit).pack(pady=(0, 16))
+
+    def relift() -> None:
+        try:
+            dialog.attributes("-topmost", False)
+            dialog.attributes("-topmost", True)
+            dialog.lift()
+            dialog.focus_force()
+            entry.focus_set()
+        except TclError:
+            return  # Already destroyed (submitted)
+        dialog.after(RELIFT_INTERVAL_MS, relift)
+
+    relift()
+    dialog.grab_set()
+    dialog.wait_window()
+    return result["value"]
+
 
 def panic(root: Tk, settings: Settings, state: State, condition: bool = True, disable: bool = True) -> None:
     def do_panic() -> None:
@@ -66,15 +116,29 @@ def panic(root: Tk, settings: Settings, state: State, condition: bool = True, di
             return
 
         if settings.panic_lockout and state.panic_lockout_active:
-            password = simpledialog.askstring("Panic", "Enter Panic Password")
+            password = ask_panic_password(root)
             if password != settings.panic_lockout_password:
                 return
 
         restore_panic_wallpaper()
         state.keyboard_process.terminate()
-        state.tray.stop()
+        if state.tray:
+            state.tray.stop()
         for popup in state.popups.copy():
             popup.close()
+        # Neither of these lived in state.popups (the spiral overlay is a
+        # persistent ambient window, not a one-shot popup; the binaural
+        # player was deliberately kept out of state.audio_players so it
+        # never competes with real pack audio for a playback slot) - so
+        # panic's cleanup never reached either one. Reported directly:
+        # after Skip to Hibernate, Panic stopped tracked popups (and the
+        # tray icon correctly disappeared) but left images/audio/the spiral
+        # still running. Both already have their own close() - they just
+        # were never being called.
+        for overlay in state.spiral_overlays:
+            overlay.close()
+        if state.binaural_overlay:
+            state.binaural_overlay.close()
         pyglet.app.exit()
         root.destroy()
 

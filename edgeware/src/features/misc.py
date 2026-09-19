@@ -70,6 +70,18 @@ def send_notification(settings: Settings, pack: Pack, notification: str | None =
 
 
 def make_tray_icon(root: Tk, settings: Settings, pack: Pack, state: State, hibernate_activity: Callable[[], None]) -> None:
+    if settings.hide_tray_panic:
+        # The point of this setting is that Panic can only be triggered by
+        # the keyboard shortcut - an icon that's still sitting in the tray,
+        # even with an empty menu or only "Skip to Hibernate" left in it
+        # (unrelated to Panic itself, but still an interactive tray
+        # presence), doesn't actually achieve that. Reported directly: the
+        # icon was still visible and still did something depending on
+        # hibernate state, even with Panic itself correctly removed from
+        # the menu. Skipping icon creation entirely is what the setting is
+        # actually meant to do.
+        return
+
     menu = [pystray.MenuItem("Panic", lambda: panic(root, settings, state))]
     if settings.hibernate_mode:
 

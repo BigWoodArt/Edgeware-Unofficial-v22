@@ -38,9 +38,24 @@ from state import State
 # (see download_booru_image below, which re-checks against this same list
 # regardless of what a pack or saved config claims booru_sites contains).
 ALLOWED_BOORU_SITES = {
-    "Atfbooru", "Behoimi", "Danbooru", "Derpibooru", "E621", "E926", "Furbooru",
-    "Gelbooru", "Hypnohub", "Konachan", "Konachan_Net", "Paheal", "Realbooru",
-    "Rule34", "Safebooru", "Tbib", "Xbooru", "Yandere",
+    "Atfbooru",
+    "Behoimi",
+    "Danbooru",
+    "Derpibooru",
+    "E621",
+    "E926",
+    "Furbooru",
+    "Gelbooru",
+    "Hypnohub",
+    "Konachan",
+    "Konachan_Net",
+    "Paheal",
+    "Realbooru",
+    "Rule34",
+    "Safebooru",
+    "Tbib",
+    "Xbooru",
+    "Yandere",
 }
 
 # Maps config/items.py's "imageResizeFilter" choice to the actual PIL filter.
@@ -90,7 +105,9 @@ def download_booru_image(settings: Settings) -> str | None:
 
     if site in booru_scraper.GELBOORU_FAMILY_DOMAINS:
         try:
-            for url in booru_scraper.search_gelbooru_family(site, settings.booru_tags, settings.booru_min_score, api_key=settings.booru_api_key, user_id=settings.booru_user_id):
+            for url in booru_scraper.search_gelbooru_family(
+                site, settings.booru_tags, settings.booru_min_score, api_key=settings.booru_api_key, user_id=settings.booru_user_id
+            ):
                 return url  # Already shuffled inside search_gelbooru_family() - first is as good as random
         except Exception as e:
             logging.warning(f'booru_scraper failed for "{site}": {e}')
@@ -136,7 +153,7 @@ class ImagePopup(Popup):
         else:
             image = Image.open(self.media)
         self.compute_geometry(image.width, image.height)
-        logging.info(f"Image popup: \"{self.media.name}\" (corruption level {self.state.corruption_level}) at ({self.x}, {self.y}), monitor {self.monitor.name}")
+        logging.info(f'Image popup: "{self.media.name}" (corruption level {self.state.corruption_level}) at ({self.x}, {self.y}), monitor {self.monitor.name}')
 
         # Static          -> image
         # Static,   hypno -> image overlay, mpv

@@ -41,6 +41,7 @@ same "ease, don't jump" philosophy as the spiral overlay's opacity.
 
 import logging
 from tkinter import Tk
+from typing import Callable
 
 import pyglet
 from config.settings import Settings
@@ -48,7 +49,9 @@ from pack import Pack
 from paths import Assets
 
 CHECK_INTERVAL_MS = 2000  # Audio drift doesn't need anywhere near the spiral overlay's 250ms responsiveness - a crossfade takes several seconds anyway.
-VOLUME_STEP_PER_CHECK = 0.01  # Eased the same way spiral opacity is - a full swing across the whole 0.15-0.35 range takes about 40 seconds, gentle rather than noticeable.
+VOLUME_STEP_PER_CHECK = (
+    0.01  # Eased the same way spiral opacity is - a full swing across the whole 0.15-0.35 range takes about 40 seconds, gentle rather than noticeable.
+)
 CROSSFADE_MS = 4000
 
 MIN_BEAT_HZ = 4.0
@@ -117,7 +120,7 @@ class BinauralOverlay:
         if old_player:
             self._fade(old_player, 0, CROSSFADE_MS, then=old_player.pause)
 
-    def _fade(self, player: pyglet.media.Player, target: float, duration_ms: int, then=None) -> None:
+    def _fade(self, player: pyglet.media.Player, target: float, duration_ms: int, then: Callable[[], None] | None = None) -> None:
         # Deliberately separate from features/audio.py's fade_in/fade_out -
         # those fade toward settings.audio_volume (the user's own volume
         # slider), which would blow straight past this feature's hard
@@ -171,7 +174,7 @@ class BinauralOverlay:
                 pass
 
 
-def handle_binaural_overlay(root: Tk, settings: Settings, pack: Pack) -> BinauralOverlay | None:
+def handle_binaural_overlay(root: Tk, settings: Settings, pack: Pack) -> BinauralOverlay | None:  # noqa: ARG001 - pack kept for signature symmetry with handle_spiral_overlay, called the same way in main_edgeware.py's safe_step
     """Called once at startup alongside handle_spiral_overlay - see that
     function and the safe_step() wrapping in main_edgeware.py. Shares
     spiralOverlayEnabled rather than having its own toggle; see this

@@ -161,7 +161,16 @@ class Popup(Toplevel):
     def try_clickthrough(self) -> None:
         if self.settings.clickthrough_enabled:
             if not hasattr(self, "player"):
-                self.wait_visibility()
+                # update_idletasks(), not wait_visibility() - the latter
+                # enters a nested Tcl event loop (tkwait visibility) that a
+                # real crash report confirmed can throw if the window gets
+                # destroyed while still waiting, and can leave the wider
+                # event queue in a bad state afterward even once the
+                # exception itself is caught (see the same fix in
+                # features/spiral_overlay.py for the full story). This
+                # forces the same pending geometry/mapping to process, just
+                # without a blocking wait that can misbehave.
+                self.update_idletasks()
             set_clickthrough(self)
 
     def try_denial_filter(self, mpv: bool) -> ImageFilter.Filter | str:
@@ -309,9 +318,27 @@ class Popup(Toplevel):
         notifier.send(title=self.pack.info.name, message=f"{filename} has been successfully sent to blacklist")
 
     def close(self) -> None:
+        if self not in self.state.popups:
+            # Already closed - most likely it closed itself naturally (its
+            # own timeout, a click) at nearly the same moment Panic's
+            # cleanup loop was also closing it, from its own separately-
+            # taken snapshot of state.popups. Closing an already-closed
+            # popup must never raise: state.popups.remove(self) below would
+            # throw ValueError on a popup no longer in the list, which
+            # would abort Panic's entire cleanup loop partway through -
+            # confirmed directly as the cause of a real report where
+            # Panic (via the keyboard shortcut) left some popups and audio
+            # still running, requiring a second Panic attempt (via the
+            # external panic.pyw signal) to actually finish the job. A
+            # fast, overlapping burst of popups (a short hibernate test
+            # cycle, for instance) makes this race far more likely to hit.
+            return
         self.state.popup_number -= 1
         self.state.popups.remove(self)
         self.try_web_open()
-        self.destroy()
+        try:
+            self.destroy()
+        except TclError:
+            pass  # Already gone
         if self.on_close:
             self.on_close()

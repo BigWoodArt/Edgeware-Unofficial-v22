@@ -51,8 +51,10 @@ if __name__ == "__main__":
 import json
 import logging
 import random
+from pathlib import Path
 from threading import Thread
 from tkinter import Tk
+from types import TracebackType
 from typing import Callable
 
 import utils
@@ -60,6 +62,7 @@ from config import first_launch_configure
 from config.items import CONFIG_ITEMS
 from config.settings import Settings
 from features.audio import play_audio
+from features.binaural_overlay import handle_binaural_overlay
 from features.corruption import handle_corruption
 from features.drive import fill_drive, replace_images
 from features.hibernate import main_hibernate, start_main_hibernate
@@ -76,9 +79,8 @@ from features.misc import (
     send_notification,
 )
 from features.prompt import Prompt
-from features.startup_splash import StartupSplash
 from features.spiral_overlay import handle_spiral_overlay
-from features.binaural_overlay import handle_binaural_overlay
+from features.startup_splash import StartupSplash
 from features.subliminal_popup import SubliminalPopup
 from features.video_popup import VideoPopup
 from os_utils import is_linux, is_windows
@@ -93,7 +95,7 @@ from voluptuous.error import Invalid
 
 
 def read_do_not_press_armed() -> bool:
-    """"Do Not Press" is a config.pyw-only feature, not a real Settings/Item,
+    """ "Do Not Press" is a config.pyw-only feature, not a real Settings/Item,
     so its flag has to be read directly from the config file rather than
     through Settings - see config.pyw's own comments for the full explanation
     of what this does and why. Never crashes startup if this is missing or
@@ -105,7 +107,7 @@ def read_do_not_press_armed() -> bool:
 
 
 def read_priority_mode() -> str:
-    """"Priority" is a config.pyw-only setting (see apply_pack_priority),
+    """ "Priority" is a config.pyw-only setting (see apply_pack_priority),
     matching the exact strings its dropdown saves ("Pack Priority" /
     "Default Priority"). Defaults to "Pack Priority" if missing or
     malformed."""
@@ -174,7 +176,7 @@ def apply_pack_priority(settings: Settings, pack: Pack) -> list[str]:
     return applied
 
 
-def pick_random_pack_path():
+def pick_random_pack_path() -> Path | None:
     if not Data.PACKS.is_dir():
         return None
     packs = [p for p in Data.PACKS.iterdir() if p.is_dir()]
@@ -195,7 +197,7 @@ if __name__ == "__main__":
     root = Tk()
     root.withdraw()
 
-    def log_callback_exception(exc_type, exc_value, exc_traceback) -> None:
+    def log_callback_exception(exc_type: type[BaseException], exc_value: BaseException | None, exc_traceback: TracebackType | None) -> None:
         # Tkinter's default behavior for an exception raised inside any
         # .after()/bind()-driven callback is to print it to stderr and keep
         # the mainloop running - invisible in .pyw (windowed, no console)
@@ -280,12 +282,17 @@ if __name__ == "__main__":
             safe_step("panic lockout", lambda: handle_panic_lockout(root, settings, state))
         safe_step("mitosis mode", lambda: handle_mitosis_mode(root, settings, pack, state))
         safe_step("pack startup script", lambda: run_script(root, settings, pack, state))
-        safe_step("spiral overlay", lambda: handle_spiral_overlay(root, settings, pack))
-        safe_step("binaural overlay", lambda: handle_binaural_overlay(root, settings, pack))
 
         if settings.hibernate_mode:
             start_main_hibernate(root, settings, pack, state, targets)
         else:
+            # In sync with the first hibernate wake-up when hibernating (see
+            # start_main_hibernate) - started here, unconditionally, only for
+            # the non-hibernating case. Reported directly: these used to
+            # start immediately regardless of hibernate mode, running under
+            # total silence before the first wake-up.
+            safe_step("spiral overlay", lambda: state.__setattr__("spiral_overlays", handle_spiral_overlay(root, settings, pack)))
+            safe_step("binaural overlay", lambda: state.__setattr__("binaural_overlay", handle_binaural_overlay(root, settings, pack)))
             safe_step("wallpaper handling", lambda: handle_wallpaper(root, settings, pack, state))
             main(root, settings, pack, targets)
 
