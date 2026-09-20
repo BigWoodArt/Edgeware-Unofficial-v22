@@ -64,7 +64,7 @@ except ImportError:
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 BANNER_PATH = SCRIPT_DIR / "banner.png"
-TOOL_VERSION = "0.12.2"
+TOOL_VERSION = "0.14"
 SETTINGS_PATH = SCRIPT_DIR / "builder_settings.json"
 
 # ---------------------------------------------------------------------------
@@ -504,6 +504,20 @@ def scan_moods(root: Path) -> list:
     if not root.is_dir():
         return []
     return sorted(p.name for p in root.iterdir() if p.is_dir())
+
+
+def looks_like_compiled_pack(folder: Path) -> bool:
+    """True if `folder` looks like an already-compiled pack (has at least
+    one of the img/aud/vid media folders, plus at least one of the JSON
+    files every compiled pack has) rather than a folder of mood
+    subfolders. Used to catch someone picking a pack's own media folder,
+    or the pack's root, for "Create New Pack" by mistake."""
+    if not folder.is_dir():
+        return False
+    has_media_folder = any((folder / name).is_dir() for name in ("img", "aud", "vid"))
+    has_pack_json = any((folder / name).is_file() for name in
+                         ("index.json", "corruption.json", "config.json", "info.json"))
+    return has_media_folder and has_pack_json
 
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
@@ -1628,8 +1642,9 @@ class PackBuilderApp:
                 tk.Label(warn_frame, text=f"- {w}", bg=WARN_BG, fg=WARN_FG,
                          wraplength=700, justify="left").pack(anchor="w")
 
+        ttk.Label(frm, text="Load Existing Pack", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 4))
         load_row = ttk.Frame(frm)
-        load_row.pack(fill="x", pady=(14, 0))
+        load_row.pack(fill="x")
         load_folder_btn = ttk.Button(load_row, text="Load Existing Pack (Folder)...", command=self._load_from_folder)
         load_folder_btn.pack(side="left")
         tip(load_folder_btn, TOOLTIPS["load_pack"])
@@ -1646,7 +1661,7 @@ class PackBuilderApp:
         self.load_progress = ttk.Progressbar(frm, mode="indeterminate")
         self.load_status_label = ttk.Label(frm, textvariable=self.load_status_var, style="Muted.TLabel")
 
-        ttk.Label(frm, text="Where is the folder of images?", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(18, 0))
+        ttk.Label(frm, text="Create New Pack", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(18, 0))
         ttk.Label(frm, text="(One subfolder per mood. The first one becomes the pack's starting mood.)",
                   style="Muted.TLabel").pack(anchor="w", pady=(0, 10))
 
@@ -1731,11 +1746,37 @@ class PackBuilderApp:
             self._set_edit_mode(False)
 
         self._start_loading("Scanning folder...")
-        result = {"names": None, "error": None}
+        result = {"names": None, "error": None, "compiled_pack_folder": None,
+                   "stepped_up_to": None, "original_folder": chosen}
 
         def worker():
             try:
-                result["names"] = scan_moods(Path(chosen))
+                target = Path(chosen)
+                names = scan_moods(target)
+
+                # Picked a folder with nothing inside it, e.g. someone
+                # selected a pack's own img/ folder directly instead of the
+                # folder of mood subfolders one level up - try the parent
+                # before giving up.
+                if not names:
+                    parent = target.parent
+                    parent_names = scan_moods(parent)
+                    if parent_names:
+                        target = parent
+                        names = parent_names
+                        result["stepped_up_to"] = str(target)
+
+                # Either the original selection or the parent we stepped up
+                # to might actually BE an already-compiled pack (img/aud/vid
+                # sitting right there alongside index.json etc.) rather than
+                # a folder of mood subfolders at all - if so, that's not a
+                # "no subfolders" problem to report, it's the wrong kind of
+                # folder entirely, and what the person almost certainly
+                # wants is to load it as an existing pack instead.
+                if looks_like_compiled_pack(target):
+                    result["compiled_pack_folder"] = str(target)
+                else:
+                    result["names"] = names
             except Exception as e:
                 result["error"] = str(e)
 
@@ -1743,7 +1784,8 @@ class PackBuilderApp:
         self.root.after(100, self._poll_folder_scan, result)
 
     def _poll_folder_scan(self, result):
-        if result["names"] is None and result["error"] is None:
+        if (result["names"] is None and result["error"] is None
+                and result["compiled_pack_folder"] is None):
             self.root.after(100, self._poll_folder_scan, result)
             return
 
@@ -1758,6 +1800,26 @@ class PackBuilderApp:
         if result["error"]:
             messagebox.showerror("Couldn't scan folder", result["error"])
             return
+
+        compiled_folder = result["compiled_pack_folder"]
+        if compiled_folder:
+            messagebox.showinfo(
+                "This looks like an existing pack",
+                f"'{compiled_folder}' looks like an already-compiled pack (it has img/aud/vid "
+                f"alongside the usual pack JSON files), not a folder of mood subfolders - "
+                f"loading it as an existing pack instead."
+            )
+            self._load_pack(Path(compiled_folder), source_folder_dir=compiled_folder)
+            return
+
+        if result["stepped_up_to"]:
+            self.source_var.set(result["stepped_up_to"])
+            self.plan.source_dir = result["stepped_up_to"]
+            messagebox.showinfo(
+                "Used the parent folder",
+                f"'{result['original_folder']}' didn't have any subfolders in it, so I used its "
+                f"parent instead:\n{result['stepped_up_to']}"
+            )
 
         self.mood_names = result["names"]
         self.plan.moods = self.mood_names

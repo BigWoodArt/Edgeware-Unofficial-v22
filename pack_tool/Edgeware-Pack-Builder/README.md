@@ -42,7 +42,9 @@ Presets in-game feel, Hibernate/Mitosis behavior, reconstruction quality, Media 
 
 ## Version History
 
-- **v0.12.2 (current)** - Fixed a crash (`'str' object has no attribute 'get'`) when a mood's `web` entries in `index.json` were plain URL strings instead of the usual `{"url": ...}` dicts (seen from packs made by other tools/conventions) - normalized at reconstruction time now. Also hardened Page 3 generally: one mood's build failing, for any reason, used to break the entire page and leave every mood after it unbuilt; each mood now builds independently, with a visible error placeholder for just that one mood instead.
+- **v0.14 (current)** - Create New Pack now steps up a folder level if the selected one has no subfolders, and redirects to Load Existing Pack if it looks like an already-compiled pack instead.
+- **v0.13** - Page 1 relabeled for clarity: "Where is the folder of images?" → "Create New Pack", with a new "Load Existing Pack" header above the folder/zip buttons.
+- **v0.12.2** - Fixed a crash when a mood's `web` entries were plain strings instead of dicts (now normalized); Page 3 also hardened so one mood's build failure can't break the whole page anymore.
 - **v0.12.1** - Fixed reconstruction (packs with no `plan.json`) finding zero images for every mood - it only ever tried grouping media via `media.json`'s guessed/unverified shape; now uses `index.json`'s own per-mood media list instead.
 - **v0.12** - Save Changes to Pack: in-place save for folder-loaded packs, timestamped backup, purple accent.
 - **v0.11** - Fixed Pack Tool folder showing selected-but-blank after load. Audio section now collapsible.
