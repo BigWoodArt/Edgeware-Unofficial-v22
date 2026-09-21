@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Edgeware++ Web Video Takeover",
+  "version": "1.0",
+  "description": "Detects the video on supported sites and hands it to Edgeware++'s local takeover server.",
+  "permissions": [],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.hypnotube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

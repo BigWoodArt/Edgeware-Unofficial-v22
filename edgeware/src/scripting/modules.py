@@ -71,7 +71,7 @@ def edgeware_v0(root: Tk, settings: Settings, pack: Pack, state: State) -> EvalF
         "video": lambda _env, video: VideoPopup(root, settings, pack, state, resource(pack.paths.video, video)),
         "audio": lambda env, audio, on_stop: play_audio(root, settings, pack, state, resource(pack.paths.audio, audio), wrap_optional_callback(env, on_stop)),
         "prompt": lambda env, prompt, on_close: Prompt(settings, pack, state, prompt, wrap_optional_callback(env, on_close)),
-        "web": lambda _env, web: open_web(pack, web),
+        "web": lambda _env, web: open_web(root, settings, state, pack, web),
         "subliminal": lambda _env, subliminal: SubliminalPopup(settings, pack, subliminal),
         "notification": lambda _env, notification: send_notification(settings, pack, notification),
     }
@@ -137,7 +137,7 @@ def edgeware_v1(root: Tk, settings: Settings, pack: Pack, state: State) -> EvalF
             root, settings, pack, state, resource(pack.paths.audio, args.get("filename")), wrap_optional_callback(env, args.get("on_stop"))
         ),
         "open_prompt": lambda env, args={}: Prompt(settings, pack, state, args.get("text"), wrap_optional_callback(env, args.get("on_close"))),
-        "open_web": lambda _env, args={}: open_web(pack, args.get("url")),
+        "open_web": lambda _env, args={}: open_web(root, settings, state, pack, args.get("url")),
         "open_subliminal": lambda _env, args={}: SubliminalPopup(settings, pack, args.get("text")),
         "send_notification": lambda _env, args={}: send_notification(settings, pack, args.get("text")),
     }

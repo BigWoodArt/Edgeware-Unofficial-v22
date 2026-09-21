@@ -1760,3 +1760,186 @@ pack images across the entire configured drive path) is genuinely
 destructive if anything about it doesn't work as intended.
 
 Version bumped to v22.2.19.
+
+## 47. v22.2.20 - Web Video Takeover: real RedGifs/PMVHaven playback, Hypnotube extension scaffolding, and a Python version warning in config.pyw
+
+**New feature, first real implementation: Web Video Takeover.** When a
+recognized site's link would fire (via the "web" popup type, a pack
+script's `web`/`open_web` call, or the "open a link on popup close"
+setting), it now plays the linked video fullscreen via mpv instead of just
+opening a browser tab, if the site is one of a short, explicit, confirmed
+list - the same standard the booru site list holds itself to, not "any
+site."
+
+Two sites work via a plain HTTP fetch and parsing the page's own static
+HTML, no JavaScript execution needed - verified directly against real
+uploaded page source from both:
+- **RedGifs**: the direct .mp4 URL sits in a plain Open Graph
+  (`og:video`) tag.
+- **PMVHaven**: the HLS master playlist URL sits in a JSON-LD
+  `VideoObject.contentUrl` block - the page has multiple such blocks, one
+  of which reuses `contentUrl` for the page's own link instead, so
+  extraction specifically checks for the `.m3u8` extension rather than
+  taking the first match.
+
+A third site, **Hypnotube**, needs real JavaScript execution first (its
+video only exists after a client-side, fingerprint-based age-gate
+resolves, potentially involving a geolocation permission prompt) - a plain
+fetch can't get past that. Scoped this via a different, sounder mechanism
+after reviewing a reference implementation (BambiBrowser)'s architecture
+(read-only research into its README, no code copied): a small companion
+browser extension that runs inside the person's own, already-verified
+browser tab, detects the video there, and hands it to a tiny loopback-only
+HTTP server bundled into Edgeware's own engine. Shipped: the extension
+shell (manifest, content script, background service worker) and the local
+server. Not yet shipped: a Hypnotube-specific detector - the current
+content script uses a generic "largest video element on the page"
+heuristic rather than real, confirmed knowledge of Hypnotube's post-gate
+page structure, which isn't available yet.
+
+The playback window itself: fullscreen, borderless, topmost, with an
+aspect-ratio-preserving blur-fill background (a standard two-copy
+ffmpeg/mpv filter chain - one copy scaled to fill and blurred, the real
+video scaled to fit and overlaid centered) so vertical/portrait video
+(common on these sites) fills the screen rather than sitting in plain
+black bars. An optional max-length setting auto-closes it after N minutes
+regardless of the video's own length (0 = unlimited). Tracked in
+`state.web_video_takeover` and wired into Panic's cleanup from the start
+this time, matching the lesson from the spiral-overlay/binaural-audio gap
+found earlier - `close()` is idempotent, since both the max-length timer
+and Panic can each trigger it independently.
+
+Two new settings in the Internet tab: "Web video takeover" (on/off,
+description names the supported sites) and "Takeover max length" (grayed
+out unless the toggle above is on).
+
+**Also this version:** config.pyw now warns on open if Python is older
+than 3.12 (the same minimum EdgewareSetup.bat already checks) - previously
+only the setup script warned, so opening config.pyw directly on an old
+Python gave no indication anything was wrong until something obscure
+broke. Verified directly across old/exact-minimum/newer Python versions.
+
+Version bumped to v22.2.20.
+
+## 48. v22.2.21 - Hypnotube detector narrowed using real, externally-confirmed page structure
+
+Direct correction: asked to look at BambiBrowser's own Hypnotube detector
+code for its technique, not to build a whole separate extension
+architecture (which is what the previous version actually did). Tried to
+fetch BambiBrowser's specific detector file directly - not reachable
+through available search/fetch tools, which only surfaced its issues/PRs
+page, never that nested file itself.
+
+Found something else useful in the process: a real, independently-written
+Tampermonkey script (unrelated to BambiBrowser or Edgeware, found via
+search) confirmed via its own `@match` directive to run against
+`hypnotube.com/video/*` pages specifically. It reveals real structure:
+video pages use `.content-sec .inner-box-container`, containing multiple
+`.box-container` elements - the video sits in one of the earlier ones, a
+later one specifically holds the comments section.
+
+Used this to narrow the extension's content script: it now searches
+`.content-sec .inner-box-container > .box-container` for a `<video>`
+element, falling back to the previous "biggest video on the page"
+heuristic only if that structure doesn't match. This is real, confirmed
+knowledge about the page's layout, not a guess - but the exact
+element/attribute holding the video itself still isn't confirmed, so this
+remains the next thing to verify directly against a real page if it
+doesn't fire correctly. JS syntax verified directly (`node --check`).
+
+Version bumped to v22.2.21.
+
+## 49. v22.2.22 - Hypnotube detector now matches BambiBrowser's real, actual code
+
+The previous version's detector was informed by a real but unrelated
+script's page-structure knowledge, not BambiBrowser's own logic - its
+actual detector file wasn't reachable through available search/fetch
+tools at the time. Provided directly this time, and it revealed two real
+things the prior guesses got wrong or missed:
+
+- **Doesn't scope to any container at all** - queries every `<video>` on
+  the page, plainly, not the `.content-sec` narrowing the last version
+  added based on an unrelated page-structure source.
+- **Explicitly skips `blob:` URLs** - missed entirely before. These are
+  typically temporary MSE/DRM buffer references, not something mpv could
+  actually fetch and play as a real URL.
+- **Scores by real on-screen area** (`getBoundingClientRect()`, not
+  `clientWidth`/`clientHeight`, which misses scaling/transforms) **and
+  doubles the score for any video URL containing `media.hypnotube.com`** -
+  Hypnotube's own CDN domain. A simple, effective disambiguator: an ad
+  rendering larger than the real player doesn't win unless it's more than
+  2x the size.
+
+BambiBrowser is MIT licensed per its own README, so this logic is reused
+directly rather than paraphrased around - adapted into this file's
+structure (it also owns the MutationObserver/reporting side, which
+BambiBrowser's own detector object doesn't handle itself), not copied
+as a whole file. JS syntax verified directly (`node --check`).
+
+Version bumped to v22.2.22.
+
+## 50. v22.2.23 - "Test Autoplay Link" dev tool in the Internet tab
+
+New, explicitly dev-only tool (may be removed later): a URL field and a
+Test button in the Internet tab. Pastes a link, calls the same
+`fetch_video_url()` used by the real Web Video Takeover feature, and if
+it's a supported site, plays it fullscreen right from config.pyw -
+letting a supported site actually be verified without needing to run the
+full engine or trigger a real popup roll. The person's configured Panic
+key closes the test (read from their own saved `panicButton` setting, not
+a hardcoded key), matching the description shown alongside the tool.
+
+Caught and fixed a real bug during testing: `tk.StringVar(self)` - `self`
+is the `App` instance, not a real Tkinter widget, so it doesn't have the
+internal method Tkinter's `Variable.__init__` expects from its `master`
+argument. Needed `self.root` (the actual Tk instance) instead, matching
+the same pattern already used elsewhere in config.pyw (e.g.
+`tk.Toplevel(self.root)` in the existing booru site tester).
+
+Verified directly end-to-end with the network call and takeover window
+mocked out: an unsupported/failing URL correctly shows an info message
+without crashing; a successful one correctly builds the settings object
+from the person's current saved config, creates the takeover with the
+right video URL, and binds their actual configured Panic key.
+
+Version bumped to v22.2.23.
+
+## 51. v22.2.24 - config.pyw can now actually apply its own updates, not just notify about them
+
+The startup version check already existed (added a while back) but only
+went as far as a clickable subtitle notice that opened the GitHub releases
+page - nothing actually got downloaded or applied. That gap is closed now.
+
+Clicking the notice asks to confirm first, then: downloads the repo's
+current main branch as a ZIP directly from GitHub (no git required),
+backs up the existing code, copies the update over the current
+installation, cleans up its temp files, and restarts config.pyw in a new
+process automatically - a live progress log shows each step.
+
+What gets **applied** (`UPDATE_PATHS`) is deliberately the full set -
+`src/`, `config.pyw`, `assets/`, `extension/` - kept as a plain, easily
+extended list specifically so future asset additions (new spirals,
+binaural tracks, etc.) update correctly too, including files that didn't
+exist locally before. What gets **backed up first** (`BACKUP_PATHS`) is
+deliberately narrower - the same three folders minus `assets/`, which is
+several MB of large, rarely-changing media and not really what a rollback
+is for. Verified directly: a backup's contents are exactly `src/`,
+`config.pyw`, `extension/` and nothing else, each backup lands under a
+megabyte, and only the most recent two are kept (older ones pruned
+automatically).
+
+The person's own `data/` folder (config.json, packs, backups themselves)
+is never touched by either the backup or the update step - verified
+directly.
+
+Tested end to end with the real network call mocked out (a locally-built
+ZIP matching GitHub's actual archive layout, `<repo>-<branch>/edgeware/...`):
+confirmed the backup happens before the copy and contains the pre-update
+code; confirmed every `UPDATE_PATHS` entry gets applied correctly,
+including a brand-new file present only in the "update" and not the
+original install; confirmed the failure path too - a malformed/invalid
+download correctly raises, leaves the existing installation completely
+untouched, skips creating a backup (since it fails before reaching that
+step), and still cleans up its temp directory despite the error.
+
+Version bumped to v22.2.24.

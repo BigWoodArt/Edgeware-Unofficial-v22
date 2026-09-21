@@ -121,6 +121,8 @@ CONFIG_ITEMS = {
     "video_volume": Item("videoVolume", PERCENTAGE, IntVar, int),
     "web_chance": Item("webMod", PERCENTAGE, IntVar, int),
     "web_on_popup_close": Item("webPopup", BOOLEAN, BooleanVar, bool),
+    "web_video_takeover": Item("webVideoTakeover", BOOLEAN, BooleanVar, bool),
+    "web_video_max_length": Item("webVideoMaxLength", NONNEGATIVE, IntVar, int),
     "prompt_chance": Item("promptMod", PERCENTAGE, IntVar, int),
     "prompt_max_mistakes": Item("promptMistakes", NONNEGATIVE, IntVar, int),
     "subliminal_chance": Item("capPopChance", PERCENTAGE, IntVar, int),

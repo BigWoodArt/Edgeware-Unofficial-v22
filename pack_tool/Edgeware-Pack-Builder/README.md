@@ -42,7 +42,8 @@ Presets in-game feel, Hibernate/Mitosis behavior, reconstruction quality, Media 
 
 ## Version History
 
-- **v0.14 (current)** - Create New Pack now steps up a folder level if the selected one has no subfolders, and redirects to Load Existing Pack if it looks like an already-compiled pack instead.
+- **v0.15 (current)** - Packs with no per-mood structure at all (pre-moods legacy Edgeware format - flat img/aud/vid, un-mood-tagged captions/prompt/web.json) now reconstruct into one "Everything" mood instead of loading empty; also fixed wallpapers being looked for in a wallpapers/ subfolder that doesn't actually exist in real compiled packs.
+- **v0.14** - Create New Pack now steps up a folder level if the selected one has no subfolders, and redirects to Load Existing Pack if it looks like an already-compiled pack instead.
 - **v0.13** - Page 1 relabeled for clarity: "Where is the folder of images?" → "Create New Pack", with a new "Load Existing Pack" header above the folder/zip buttons.
 - **v0.12.2** - Fixed a crash when a mood's `web` entries were plain strings instead of dicts (now normalized); Page 3 also hardened so one mood's build failure can't break the whole page anymore.
 - **v0.12.1** - Fixed reconstruction (packs with no `plan.json`) finding zero images for every mood - it only ever tried grouping media via `media.json`'s guessed/unverified shape; now uses `index.json`'s own per-mood media list instead.

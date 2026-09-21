@@ -30,6 +30,7 @@ import pystray
 from config.settings import Settings
 from desktop_notifier import DesktopNotifier
 from desktop_notifier.common import Attachment, Icon
+from features.web_video_takeover import open_web_video_takeover
 from os_utils import make_shortcut, set_wallpaper
 from pack import Pack
 from panic import panic
@@ -41,11 +42,14 @@ from roll import roll
 from state import State
 
 
-def open_web(pack: Pack, web: str | None = None) -> None:
+def open_web(root: Tk, settings: Settings, state: State, pack: Pack, web: str | None = None) -> None:
     web = web or pack.random_web()
-    if web:
-        # webbrowser.open can pause Edgeware if opening the browser takes a long time
-        Thread(target=lambda: webbrowser.open(web), daemon=True).start()
+    if not web:
+        return
+    if settings.web_video_takeover and open_web_video_takeover(root, settings, state, web):
+        return  # Handled as a fullscreen takeover instead of a plain browser tab
+    # webbrowser.open can pause Edgeware if opening the browser takes a long time
+    Thread(target=lambda: webbrowser.open(web), daemon=True).start()
 
 
 def send_notification(settings: Settings, pack: Pack, notification: str | None = None) -> None:

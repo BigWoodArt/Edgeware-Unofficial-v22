@@ -25,6 +25,8 @@
   "promptMistakes": 3,
   "mitosisMode": 0,
   "webPopup": 0,
+  "webVideoTakeover": 0,
+  "webVideoMaxLength": 0,
   "rotateWallpaper": 0,
   "wallpaperTimer": 30,
   "wallpaperVariance": 0,

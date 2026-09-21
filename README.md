@@ -103,6 +103,9 @@ worth a look before relying on them:
 * Discord Rich Presence - never mentioned or tested at all.
 * Multi-click closing, Mood Set toggle - both active, unconfirmed.
 * Popup auto-close/fade timing - worth re-confirming visually.
+* Web Video Takeover - RedGifs/PMVHaven extraction tested, real playback isn't.
+* Hypnotube detector is a generic placeholder, not site-specific yet.
+* Self-update's real-Windows restart/file-overwrite: logic tested, not that.
 
 
 ## Changelog
@@ -117,6 +120,16 @@ Entries are kept to 20 words or less.
 * `config.pyw` rebuilt from the ground up for clear, full control over pack runs.
 * A pack's own settings under Pack Priority were silently wiped out at corruption's first level - fixed.
 * New optional full-screen spiral overlay with paired binaural audio, reacting to session intensity with hard opacity/volume caps.
+
+**v22.2.24** - Config.pyw can now actually apply its own updates: download, backup code, apply, restart - not just notify.
+
+**v22.2.23** - New dev tool: paste a link in the Internet tab, test Web Video Takeover directly, close with your Panic key.
+
+**v22.2.22** - Hypnotube detector now matches BambiBrowser's actual code: skips blob URLs, weights Hypnotube's own CDN domain.
+
+**v22.2.21** - Narrowed Hypnotube's detector using real, confirmed page structure from an independent source - still not fully verified.
+
+**v22.2.20** - New: Web Video Takeover plays RedGifs/PMVHaven fullscreen via mpv. Hypnotube extension scaffolded. Config now warns on old Python.
 
 **v22.2.19** - Fixed misleading fade-time description (audio only, not popups). Rewrote changelog to 20 words or less. Added untested-features list.
 

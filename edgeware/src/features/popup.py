@@ -293,7 +293,7 @@ class Popup(Toplevel):
 
     def try_web_open(self) -> None:
         if self.settings.web_on_popup_close and roll((100 - self.settings.web_chance) / 2):
-            open_web(self.pack)
+            open_web(self.root, self.settings, self.state, self.pack)
 
     def try_mitosis(self) -> None:
         if self.settings.mitosis_mode and not self.settings.lowkey_mode:

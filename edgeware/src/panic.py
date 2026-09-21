@@ -139,6 +139,14 @@ def panic(root: Tk, settings: Settings, state: State, condition: bool = True, di
             overlay.close()
         if state.binaural_overlay:
             state.binaural_overlay.close()
+        if state.web_video_takeover:
+            # Added ahead of the takeover feature itself actually existing -
+            # tracked and closed here from the start this time, rather than
+            # repeating the spiral/binaural mistake above of building the
+            # feature first and only adding Panic cleanup after a report.
+            # Whatever creates state.web_video_takeover just needs to give
+            # it a close() method, the same contract as the other two.
+            state.web_video_takeover.close()
         pyglet.app.exit()
         root.destroy()
 

@@ -64,7 +64,7 @@ except ImportError:
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 BANNER_PATH = SCRIPT_DIR / "banner.png"
-TOOL_VERSION = "0.14"
+TOOL_VERSION = "0.15"
 SETTINGS_PATH = SCRIPT_DIR / "builder_settings.json"
 
 # ---------------------------------------------------------------------------
@@ -1283,9 +1283,18 @@ def reconstruct_plan_from_compiled_pack(folder: Path) -> tuple:
     corruption = _read_json(root / "corruption.json") or {}
     config = _read_json(root / "config.json") or {}
 
-    if not info and not index:
+    # A legacy/pre-moods pack (see the "Everything" fallback below) never
+    # had info.json or index.json at all - captions.json/prompt.json/
+    # web.json plus img/aud/vid is just as valid a signal that this is a
+    # real pack, so don't bail out before even checking for those.
+    looks_like_legacy = (
+        (root / "captions.json").is_file() or (root / "prompt.json").is_file()
+        or (root / "web.json").is_file()
+        or any((root / d).is_dir() for d in ("img", "aud", "vid"))
+    )
+    if not info and not index and not looks_like_legacy:
         return None, ["This doesn't look like a compiled Edgeware++ pack - "
-                       "no readable info.json or index.json found."]
+                       "no readable info.json, index.json, or legacy pack files found."]
 
     plan = PackPlan()
     plan.pack_name = info.get("name", plan.pack_name)
@@ -1306,33 +1315,111 @@ def reconstruct_plan_from_compiled_pack(folder: Path) -> tuple:
     plan.pack_buttonless = bool(config.get("buttonless", plan.pack_buttonless))
 
     moods_list = index.get("moods", [])
-    if not moods_list:
-        warnings.append("index.json didn't have the mood list I expected - moods will be empty.")
-
     mood_names = []
     mood_configs = {}
-    for entry in moods_list:
-        name = entry.get("mood")
-        if not name:
-            continue
-        mood_names.append(name)
-        # index.json's per-mood "web" is normally [{"url": ..., "args": [...]}],
-        # but a pack from a different source (or an older/other-tool
-        # convention) can have it as plain URL strings instead - normalize
-        # here, once, so every place downstream that expects dicts (Per-Mood's
-        # web text box in particular) can't get handed something else and
-        # crash the whole page build partway through.
-        raw_web = entry.get("web", [])
-        normalized_web = [{"url": w, "args": []} if isinstance(w, str) else w for w in raw_web]
-        mood_configs[name] = asdict(MoodConfig(
-            name=name,
-            captions=entry.get("captions", []),
-            notifications=entry.get("notifications", []),
-            subliminal_messages=entry.get("subliminal-messages", []),
-            prompts=entry.get("prompts", []),
-            denial_captions=entry.get("denial", []),
-            web_entries=normalized_web,
-        ))
+    legacy_media_handled = False
+
+    if not moods_list:
+        # No per-mood structure in index.json at all. Could be a genuinely
+        # broken/incomplete Plus-Plus pack, or - confirmed against the real
+        # compiler's own legacy/write_files.py - a pre-moods/corruption-
+        # levels Edgeware pack format: flat img/aud/vid with no per-mood
+        # split, captions.json/prompt.json/web.json using "moods"/"prefix"
+        # purely as loose content-variety tags, never as an image grouping.
+        # That format has no per-mood structure to reconstruct at all, so
+        # rather than leave everything empty, pool it into one mood - not a
+        # compromise, since there was never a real split to preserve here.
+        img_files = [p for p in (root / "img").iterdir() if p.is_file()] if (root / "img").is_dir() else []
+        vid_files = [p for p in (root / "vid").iterdir() if p.is_file()] if (root / "vid").is_dir() else []
+        aud_files = [p for p in (root / "aud").iterdir() if p.is_file()] if (root / "aud").is_dir() else []
+        legacy_captions = _read_json(root / "captions.json")
+        legacy_prompt = _read_json(root / "prompt.json")
+        legacy_web = _read_json(root / "web.json")
+
+        if img_files or vid_files or aud_files or legacy_captions or legacy_prompt or legacy_web:
+            warnings.append(
+                "This pack has no per-mood structure at all (no index.json moods list) - looks "
+                "like a pre-mood/legacy Edgeware pack format. Everything's been pooled into one "
+                "mood called 'Everything' rather than left empty, since there was never a "
+                "per-mood split in this format to preserve."
+            )
+            mood_name = "Everything"
+            mc = asdict(MoodConfig(name=mood_name))
+            mc["media_files"] = [str(p) for p in img_files + vid_files + aud_files]
+
+            if legacy_captions:
+                captions = list(legacy_captions.get("default", []))
+                for prefix_name in legacy_captions.get("prefix", []) or []:
+                    captions.extend(legacy_captions.get(prefix_name, []))
+                mc["captions"] = captions
+                if legacy_captions.get("denial"):
+                    mc["denial_captions"] = legacy_captions["denial"]
+                if legacy_captions.get("subliminals"):
+                    mc["subliminal_messages"] = legacy_captions["subliminals"]
+                if legacy_captions.get("notifications"):
+                    mc["notifications"] = legacy_captions["notifications"]
+
+            if legacy_prompt:
+                prompts = list(legacy_prompt.get("default", []))
+                for mood_key in legacy_prompt.get("moods", []) or []:
+                    if mood_key != "default":
+                        prompts.extend(legacy_prompt.get(mood_key, []))
+                mc["prompts"] = prompts
+
+            if legacy_web:
+                urls = legacy_web.get("urls", [])
+                args_list = legacy_web.get("args", [])
+                web_entries = []
+                for i, url in enumerate(urls):
+                    args_str = args_list[i] if i < len(args_list) else ""
+                    web_entries.append({"url": url, "args": args_str.split(",") if args_str else []})
+                mc["web_entries"] = web_entries
+
+            # Loose images sitting directly in the pack root (not inside
+            # img/aud/vid/hypno) are this format's wallpaper/background
+            # pool - no per-mood wallpaper concept here either, so just
+            # pick one as the pack's default and flag that there were more.
+            bg_candidates = sorted(
+                p for p in root.iterdir()
+                if p.is_file() and p.suffix.lower() in IMAGE_EXTS and not p.name.startswith("loading_splash")
+            )
+            if bg_candidates:
+                plan.default_wallpaper_path = str(bg_candidates[0])
+                if len(bg_candidates) > 1:
+                    warnings.append(
+                        f"Found {len(bg_candidates)} background images loose in the pack's root "
+                        f"folder - used '{bg_candidates[0].name}' as the default wallpaper. Check "
+                        f"the Pack-Wide Extras on the Whole-Experience page for a different one."
+                    )
+
+            mood_names = [mood_name]
+            mood_configs = {mood_name: mc}
+            legacy_media_handled = True
+        else:
+            warnings.append("index.json didn't have the mood list I expected - moods will be empty.")
+    else:
+        for entry in moods_list:
+            name = entry.get("mood")
+            if not name:
+                continue
+            mood_names.append(name)
+            # index.json's per-mood "web" is normally [{"url": ..., "args": [...]}],
+            # but a pack from a different source (or an older/other-tool
+            # convention) can have it as plain URL strings instead - normalize
+            # here, once, so every place downstream that expects dicts (Per-Mood's
+            # web text box in particular) can't get handed something else and
+            # crash the whole page build partway through.
+            raw_web = entry.get("web", [])
+            normalized_web = [{"url": w, "args": []} if isinstance(w, str) else w for w in raw_web]
+            mood_configs[name] = asdict(MoodConfig(
+                name=name,
+                captions=entry.get("captions", []),
+                notifications=entry.get("notifications", []),
+                subliminal_messages=entry.get("subliminal-messages", []),
+                prompts=entry.get("prompts", []),
+                denial_captions=entry.get("denial", []),
+                web_entries=normalized_web,
+            ))
     plan.moods = mood_names
 
     # Overlay corruption levels: wallpaper triggers, audio/advanced knobs,
@@ -1361,7 +1448,14 @@ def reconstruct_plan_from_compiled_pack(folder: Path) -> tuple:
                 mc["advanced"] = advanced
 
             if wallpaper_name:
-                candidate = root / "wallpapers" / wallpaper_name
+                # Wallpapers sit at the pack's root, not a wallpapers/
+                # subfolder - confirmed against the real compiler's own
+                # copy_wallpapers() output (see conversation history).
+                # wallpapers/ kept as a fallback in case of a different
+                # compiler version/convention.
+                candidate = root / wallpaper_name
+                if not candidate.is_file():
+                    candidate = root / "wallpapers" / wallpaper_name
                 mc["wallpaper_change"] = True
                 mc["wallpaper_path"] = str(candidate) if candidate.is_file() else ""
                 if not candidate.is_file():
@@ -1376,77 +1470,81 @@ def reconstruct_plan_from_compiled_pack(folder: Path) -> tuple:
     # media.json's shape, which was never actually verified against a real
     # compiled pack and evidently doesn't match one: it was leaving every
     # mood's media completely empty on packs with no plan.json, silently.
-    grouped_any = False
-    for mood_entry in index.get("moods", []) if isinstance(index, dict) else []:
-        mood_name = mood_entry.get("mood")
-        if mood_name not in mood_configs:
-            continue
-        for filename in mood_entry.get("media", []):
-            file_path = None
-            for subfolder in ("img", "aud", "vid"):
-                candidate = root / subfolder / filename
-                if candidate.is_file():
-                    file_path = candidate
-                    break
-            if file_path is not None:
-                mood_configs[mood_name].setdefault("media_files", [])
-                mood_configs[mood_name]["media_files"].append(str(file_path))
-                grouped_any = True
-            else:
-                warnings.append(f"'{mood_name}' media: '{filename}' is listed in index.json "
-                                 f"but isn't in img/aud/vid - it may have been removed from the pack.")
-
-    # media.json fallback, only if index.json didn't have moods/media at all
-    # (an unusually old or hand-built pack) - unverified shape, kept only as
-    # a last resort rather than the primary method.
-    if not grouped_any:
-        if isinstance(media, dict):
-            entries = media.items() if all(isinstance(v, dict) for v in media.values()) else []
-            for filename, meta in entries:
-                file_moods = meta.get("moods") or meta.get("mood") or []
-                if isinstance(file_moods, str):
-                    file_moods = [file_moods]
+    # Skipped entirely for the legacy/mood-less fallback above - that
+    # already populated the one mood's media directly, and index.json has
+    # no "moods" to iterate here anyway (it's what triggered that path).
+    if not legacy_media_handled:
+        grouped_any = False
+        for mood_entry in index.get("moods", []) if isinstance(index, dict) else []:
+            mood_name = mood_entry.get("mood")
+            if mood_name not in mood_configs:
+                continue
+            for filename in mood_entry.get("media", []):
                 file_path = None
                 for subfolder in ("img", "aud", "vid"):
                     candidate = root / subfolder / filename
                     if candidate.is_file():
                         file_path = candidate
                         break
-                if not file_path:
-                    continue
-                for m in file_moods:
-                    if m in mood_configs:
-                        mood_configs[m].setdefault("media_files", [])
-                        mood_configs[m]["media_files"].append(str(file_path))
-                        grouped_any = True
-        elif isinstance(media, list):
-            for entry in media:
-                filename = entry.get("file") or entry.get("path")
-                file_moods = entry.get("moods") or entry.get("mood") or []
-                if isinstance(file_moods, str):
-                    file_moods = [file_moods]
-                if not filename:
-                    continue
-                file_path = None
-                for subfolder in ("img", "aud", "vid"):
-                    candidate = root / subfolder / Path(filename).name
-                    if candidate.is_file():
-                        file_path = candidate
-                        break
-                if not file_path:
-                    continue
-                for m in file_moods:
-                    if m in mood_configs:
-                        mood_configs[m].setdefault("media_files", [])
-                        mood_configs[m]["media_files"].append(str(file_path))
-                        grouped_any = True
+                if file_path is not None:
+                    mood_configs[mood_name].setdefault("media_files", [])
+                    mood_configs[mood_name]["media_files"].append(str(file_path))
+                    grouped_any = True
+                else:
+                    warnings.append(f"'{mood_name}' media: '{filename}' is listed in index.json "
+                                     f"but isn't in img/aud/vid - it may have been removed from the pack.")
 
-    if not grouped_any:
-        warnings.append(
-            "Couldn't find any per-mood media grouping in this pack (checked index.json and "
-            "media.json) - you'll need to point each mood at its images again before rebuilding "
-            "(everything else - captions, corruption levels, settings - carried over)."
-        )
+        # media.json fallback, only if index.json didn't have moods/media at
+        # all (an unusually old or hand-built pack) - unverified shape, kept
+        # only as a last resort rather than the primary method.
+        if not grouped_any:
+            if isinstance(media, dict):
+                entries = media.items() if all(isinstance(v, dict) for v in media.values()) else []
+                for filename, meta in entries:
+                    file_moods = meta.get("moods") or meta.get("mood") or []
+                    if isinstance(file_moods, str):
+                        file_moods = [file_moods]
+                    file_path = None
+                    for subfolder in ("img", "aud", "vid"):
+                        candidate = root / subfolder / filename
+                        if candidate.is_file():
+                            file_path = candidate
+                            break
+                    if not file_path:
+                        continue
+                    for m in file_moods:
+                        if m in mood_configs:
+                            mood_configs[m].setdefault("media_files", [])
+                            mood_configs[m]["media_files"].append(str(file_path))
+                            grouped_any = True
+            elif isinstance(media, list):
+                for entry in media:
+                    filename = entry.get("file") or entry.get("path")
+                    file_moods = entry.get("moods") or entry.get("mood") or []
+                    if isinstance(file_moods, str):
+                        file_moods = [file_moods]
+                    if not filename:
+                        continue
+                    file_path = None
+                    for subfolder in ("img", "aud", "vid"):
+                        candidate = root / subfolder / Path(filename).name
+                        if candidate.is_file():
+                            file_path = candidate
+                            break
+                    if not file_path:
+                        continue
+                    for m in file_moods:
+                        if m in mood_configs:
+                            mood_configs[m].setdefault("media_files", [])
+                            mood_configs[m]["media_files"].append(str(file_path))
+                            grouped_any = True
+
+        if not grouped_any:
+            warnings.append(
+                "Couldn't find any per-mood media grouping in this pack (checked index.json and "
+                "media.json) - you'll need to point each mood at its images again before rebuilding "
+                "(everything else - captions, corruption levels, settings - carried over)."
+            )
 
     plan.mood_configs = mood_configs
 
@@ -1454,9 +1552,15 @@ def reconstruct_plan_from_compiled_pack(folder: Path) -> tuple:
     if hypno_dir.is_dir():
         plan.hypno_paths = [str(p) for p in hypno_dir.iterdir() if p.is_file()]
 
-    default_wp = root / "wallpapers" / "wallpaper.png"
-    if default_wp.is_file():
-        plan.default_wallpaper_path = str(default_wp)
+    # Wallpapers sit at the pack's root, not a wallpapers/ subfolder -
+    # confirmed against the real compiler's own output. wallpapers/ kept as
+    # a fallback in case of a different compiler version/convention. Don't
+    # overwrite anything the legacy/mood-less fallback above already picked.
+    if not plan.default_wallpaper_path:
+        for candidate in (root / "wallpaper.png", root / "wallpapers" / "wallpaper.png"):
+            if candidate.is_file():
+                plan.default_wallpaper_path = str(candidate)
+                break
 
     for ext in (".png", ".gif", ".jpg", ".jpeg", ".bmp"):
         splash = root / f"loading_splash{ext}"

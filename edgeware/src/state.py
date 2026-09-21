@@ -67,6 +67,7 @@ class State:
 
     spiral_overlays: list = field(default_factory=list)
     binaural_overlay = None
+    web_video_takeover = None
 
     keyboard_process: multiprocessing.Process | None = None
     alt_held = False

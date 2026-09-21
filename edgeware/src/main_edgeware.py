@@ -83,6 +83,7 @@ from features.spiral_overlay import handle_spiral_overlay
 from features.startup_splash import StartupSplash
 from features.subliminal_popup import SubliminalPopup
 from features.video_popup import VideoPopup
+from features.web_video_takeover import start_takeover_server
 from os_utils import is_linux, is_windows
 from os_utils.linux_utils import get_desktop_environment
 from pack import Pack
@@ -243,7 +244,7 @@ if __name__ == "__main__":
         RollTarget(lambda: SubliminalPopup(settings, pack), lambda: settings.subliminal_chance),
         RollTarget(lambda: Prompt(settings, pack, state), lambda: settings.prompt_chance),
         RollTarget(lambda: play_audio(root, settings, pack, state), lambda: settings.audio_chance),
-        RollTarget(lambda: open_web(pack), lambda: settings.web_chance),
+        RollTarget(lambda: open_web(root, settings, state, pack), lambda: settings.web_chance),
         RollTarget(lambda: send_notification(settings, pack), lambda: settings.notification_chance),
     ]
 
@@ -282,6 +283,11 @@ if __name__ == "__main__":
             safe_step("panic lockout", lambda: handle_panic_lockout(root, settings, state))
         safe_step("mitosis mode", lambda: handle_mitosis_mode(root, settings, pack, state))
         safe_step("pack startup script", lambda: run_script(root, settings, pack, state))
+        if settings.web_video_takeover:
+            # Unconditional regardless of hibernate mode - this just listens
+            # for the browser extension's detected videos (Hypnotube), it
+            # doesn't do anything on its own until one arrives.
+            safe_step("web video takeover server", lambda: start_takeover_server(root, settings, state))
 
         if settings.hibernate_mode:
             start_main_hibernate(root, settings, pack, state, targets)

@@ -18,13 +18,27 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP = "Edgeware++ Configuration"
-VERSION = "22.2.19"
+VERSION = "22.2.24"
 # Points at this fork, not the original Araten/EdgewarePlusPlus repo - the
 # old config_original.pyw's legacy update-check still (deliberately) checks
 # upstream, since that's faithful to the original tool's behavior. This one
 # checks our own repo since it's tracking our own version scheme.
 UPDATE_CHECK_URL = "https://raw.githubusercontent.com/BigWoodArt/Edgeware-Unofficial-v22/main/edgeware/config.pyw"
 UPDATE_RELEASES_URL = "https://github.com/BigWoodArt/Edgeware-Unofficial-v22"
+UPDATE_ZIP_URL = UPDATE_RELEASES_URL + "/archive/refs/heads/main.zip"
+# What actually gets applied from a downloaded update - the full set, kept
+# as a plain list specifically so it's easy to extend later (e.g. adding
+# new spiral/binaural assets down the line just needs a new folder added
+# here, not a rewrite of the update logic itself).
+UPDATE_PATHS = ["src", "config.pyw", "assets", "extension"]
+# What gets backed up before an update is applied - deliberately narrower
+# than UPDATE_PATHS: assets/ is large (several MB, mostly big, rarely-
+# changing media) and a broken asset is a minor, easily-noticed problem,
+# not the kind of thing a rollback is really for. Keeping backups to just
+# the actual code keeps each one under a megabyte.
+BACKUP_PATHS = ["src", "config.pyw", "extension"]
+BACKUP_DIR_NAME = "update_backups"
+MAX_BACKUPS_KEPT = 2
 DO_NOT_PRESS_KEY = "_doNotPressArmed"
 HERE = Path(__file__).resolve().parent
 DATA = HERE / "data"
@@ -104,6 +118,7 @@ PARENT_CHILD = {
     "capPopChance": ["capPopTimer", "capPopOpacity", "capPopTextColor", "capPopOutlineColor"],
     "subliminalsChance": ["subliminalsAlpha"],
     "spiralOverlayEnabled": ["spiralOverlayAsset"],
+    "webVideoTakeover": ["webVideoMaxLength"],
     "notificationChance": ["notificationImageChance"],
     "promptMod": ["promptMistakes"],
 }
@@ -194,6 +209,8 @@ SECTIONS = {
         ("booruApiKey", "Gelbooru API key", "Only used for Gelbooru specifically - it now requires this and a user ID below to search at all. Get both from a Gelbooru account's own page. Leave blank if you're not using Gelbooru.", "text", None),
         ("booruUserId", "Gelbooru user ID", "Goes with the API key above - both are required together for Gelbooru specifically.", "text", None),
         ("booruSites", "Sites to search", "Pick which sites to search - one is chosen at random each time, using the tags above. Dimmed sites aren't rebuilt yet and may not work, but are still clickable if you want to try one.", "booru_sites", None),
+        ("webVideoTakeover", "Web video takeover", "Opens a recognized site's video fullscreen and locked until it ends, instead of just opening the page. Supports RedGifs, PMVHaven, Hypnotube.", "bool", None),
+        ("webVideoMaxLength", "Takeover max length", "Auto-closes a takeover video after this many minutes, regardless of its own length. 0 means no limit.", "int", None),
     ],
     "Modes": [
         ("lkToggle", "Low-key mode", "Keeps activity concentrated in one corner of the screen.", "bool", None),
@@ -375,6 +392,80 @@ def fetch_live_version():
         return match.group(1) if match else None
     except Exception:
         return None
+
+
+def make_backup():
+    """Zips up the current code (BACKUP_PATHS only, never assets/ - see the
+    note by that constant) before an update overwrites it, and prunes old
+    backups down to MAX_BACKUPS_KEPT. Raises on failure - a backup that
+    silently didn't happen is worse than an update that refuses to
+    proceed."""
+    backup_dir = HERE / "data" / BACKUP_DIR_NAME
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_zip = backup_dir / f"backup-v{VERSION}-{stamp}.zip"
+    with zipfile.ZipFile(backup_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+        for rel_path in BACKUP_PATHS:
+            path = HERE / rel_path
+            if not path.exists():
+                continue
+            if path.is_dir():
+                for f in path.rglob("*"):
+                    if f.is_file():
+                        zf.write(f, f.relative_to(HERE))
+            else:
+                zf.write(path, path.relative_to(HERE))
+
+    backups = sorted(backup_dir.glob("backup-*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for old in backups[MAX_BACKUPS_KEPT:]:
+        old.unlink(missing_ok=True)
+    return backup_zip
+
+
+def apply_update(progress):
+    """Downloads the repo's current main branch, backs up the existing code,
+    and copies UPDATE_PATHS over the current installation. progress(text) is
+    called for each step, so the caller can show it live. Raises on any
+    real failure - the caller is expected to report that rather than
+    pretend the update succeeded."""
+    tmp_dir = Path(tempfile.mkdtemp(prefix="edgeware_update_"))
+    try:
+        progress("Downloading the latest version...")
+        zip_path = tmp_dir / "update.zip"
+        urllib.request.urlretrieve(UPDATE_ZIP_URL, zip_path)
+
+        progress("Extracting...")
+        extract_dir = tmp_dir / "extracted"
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(extract_dir)
+
+        # GitHub's own branch-archive ZIPs always wrap everything in one
+        # top-level <repo>-<branch>/ folder - work relative to that rather
+        # than hardcoding its exact name (repo name/branch could change).
+        top_level = next(extract_dir.iterdir())
+        new_edgeware_root = top_level / "edgeware"
+        if not new_edgeware_root.is_dir():
+            raise RuntimeError("The downloaded update doesn't look like a valid Edgeware++ repo (missing its edgeware/ folder).")
+
+        progress("Backing up your current code (not your settings or packs)...")
+        make_backup()
+
+        progress("Applying the update...")
+        for rel_path in UPDATE_PATHS:
+            src = new_edgeware_root / rel_path
+            dst = HERE / rel_path
+            if not src.exists():
+                continue  # A future update might drop a path - don't fail the whole update over one missing piece
+            if src.is_dir():
+                if dst.exists():
+                    shutil.rmtree(dst)
+                shutil.copytree(src, dst)
+            else:
+                shutil.copy2(src, dst)
+            progress(f"  updated {rel_path}")
+    finally:
+        progress("Cleaning up temporary files...")
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def _test_one_booru_site(site, tags, min_score, api_key, user_id, booru_scraper_mod, booru_pkg_mod, asyncio_mod):
@@ -920,7 +1011,78 @@ class App:
             text=f"CONFIGURATION MANAGER  ·  v{VERSION}  ·  UPDATE AVAILABLE: v{live_version} (click)",
             fg=self.palette["accent"], cursor="hand2",
         )
-        self.subtitle.bind("<Button-1>", lambda e: webbrowser.open(UPDATE_RELEASES_URL))
+        self.subtitle.bind("<Button-1>", lambda e: self.offer_update(live_version))
+
+    def offer_update(self, live_version):
+        if getattr(self, "update_running", False):
+            return
+        if not messagebox.askyesno(APP, f"Update available: v{live_version} (you have v{VERSION}).\n\nDownload and apply it now? Only the program's own code and default assets change - your saved settings and packs are never touched. This window will restart when it's done."):
+            webbrowser.open(UPDATE_RELEASES_URL)
+            return
+        self.run_update_dialog()
+
+    def run_update_dialog(self):
+        self.update_running = True
+
+        win = tk.Toplevel(self.root)
+        win.title("Updating Edgeware++")
+        win.geometry("560x360")
+        win.transient(self.root); win.grab_set()
+        win.protocol("WM_DELETE_WINDOW", lambda: None)  # Don't let this be closed mid-update
+        win.configure(bg=self.palette["bg"])
+        tk.Label(win,text="Updating Edgeware++",bg=self.palette["bg"],fg=self.palette["white"],font=("Segoe UI",14,"bold")).pack(anchor="w",padx=18,pady=(16,3))
+
+        log_text=tk.Text(win,bg=self.palette["panel"],fg=self.palette["white"],font=("Consolas",9),wrap="word",state="disabled",height=14,relief="flat")
+        log_text.pack(fill="both",expand=True,padx=18,pady=(4,8))
+        log_text.tag_configure("ok",foreground="#4CD787")
+        log_text.tag_configure("fail",foreground="#E8546B")
+
+        def append_line(text,tag=None):
+            log_text.configure(state="normal")
+            log_text.insert("end",text+"\n",tag or ())
+            log_text.see("end")
+            log_text.configure(state="disabled")
+
+        q=Queue()
+
+        def worker():
+            try:
+                apply_update(lambda text: q.put({"stage":"progress","text":text}))
+                q.put({"stage":"done"})
+            except Exception as e:
+                q.put({"stage":"error","detail":str(e)})
+        threading.Thread(target=worker,daemon=True).start()
+
+        def poll():
+            try:
+                while True:
+                    msg=q.get_nowait()
+                    if msg["stage"]=="progress":
+                        append_line(msg["text"])
+                    elif msg["stage"]=="done":
+                        append_line("Update applied. Restarting...","ok")
+                        self.update_running=False
+                        win.after(1200,self.restart_after_update)
+                        return
+                    elif msg["stage"]=="error":
+                        append_line(f"Update failed: {msg['detail']}","fail")
+                        append_line("Nothing was applied, or the backup is available to restore from if something did apply partway - your settings and packs were never touched either way.")
+                        self.update_running=False
+                        win.protocol("WM_DELETE_WINDOW",win.destroy)
+                        close_btn=self.make_button(win,"Close",win.destroy,primary=True)
+                        close_btn.pack(pady=(0,14))
+                        return
+            except Empty:
+                pass
+            win.after(120,poll)
+        poll()
+
+    def restart_after_update(self):
+        try:
+            subprocess.Popen([sys.executable,str(HERE/"config.pyw")])
+        except Exception as e:
+            messagebox.showerror(APP,f"Update applied, but couldn't restart automatically. Please reopen config.pyw yourself.\n\n{e}")
+        self.root.destroy()
 
     def build_shell(self):
         self.root.configure(bg=self.palette["bg"])
@@ -1802,6 +1964,68 @@ class App:
             lambda n: f"Converted {n} GIF file(s) to WebP.",
         )
 
+    def add_autoplay_link_tester(self):
+        card=tk.Frame(self.page,bg=self.palette["panel2"],highlightthickness=1,highlightbackground=self.palette["border"])
+        card.pack(fill="x",padx=14,pady=3)
+        inner=tk.Frame(card,bg=self.palette["panel2"]); inner.pack(fill="x",padx=10,pady=7)
+        tk.Label(inner,text="Test Autoplay Link (dev)",bg=self.palette["panel2"],fg=self.palette["white"],font=("Segoe UI",10,"bold")).pack(anchor="w")
+        tk.Label(inner,text="Paste a link and press Test. If it's a supported site, the video plays fullscreen right here - press your Panic key to end the test.",bg=self.palette["panel2"],fg=self.palette["muted"],font=("Segoe UI",9),wraplength=560,justify="left").pack(anchor="w",pady=(1,6))
+        row=tk.Frame(inner,bg=self.palette["panel2"]); row.pack(fill="x")
+        entry_var=tk.StringVar(self.root)
+        entry=tk.Entry(row,textvariable=entry_var,bg=self.palette["panel"],fg=self.palette["white"],insertbackground=self.palette["white"],relief="flat")
+        entry.pack(side="left",fill="x",expand=True,ipady=4,padx=(0,8))
+        self.make_button(row,"Test",lambda:self.test_autoplay_link(entry_var.get().strip())).pack(side="left")
+
+    def test_autoplay_link(self,url):
+        if not url:
+            return
+        if getattr(self,"autoplay_test_running",False):
+            return
+        self.autoplay_test_running=True
+
+        src_path=str(HERE/"src")
+        if src_path not in sys.path: sys.path.insert(0,src_path)
+        try:
+            from features.web_video_takeover import WebVideoTakeover, fetch_video_url
+        except Exception as e:
+            self.autoplay_test_running=False
+            messagebox.showerror(APP,f"Couldn't load the web video takeover code.\n\n{e}")
+            return
+
+        self.status.set(f"Testing {url}...")
+
+        def worker():
+            video_url=None
+            error=None
+            try:
+                video_url=fetch_video_url(url)
+            except Exception as e:
+                error=str(e)
+            self.root.after(0,lambda:finish(video_url,error))
+
+        def finish(video_url,error):
+            self.autoplay_test_running=False
+            if error:
+                self.status.set("Test failed.")
+                messagebox.showerror(APP,f"Error testing that link.\n\n{error}")
+                return
+            if not video_url:
+                self.status.set("Test failed.")
+                messagebox.showinfo(APP,"That's not a supported site, or it didn't return a playable video this way.")
+                return
+            self.status.set("Test playing - press your Panic key to end it.")
+            settings=SimpleNamespace(
+                mpv_subprocess=truth(self.cfg.get("mpvSubprocess",1)),
+                video_hardware_acceleration=truth(self.cfg.get("videoHardwareAcceleration",1)),
+                web_video_max_length=int(self.cfg.get("webVideoMaxLength",0) or 0),
+            )
+            takeover=WebVideoTakeover(self.root,settings,video_url)
+            panic_key=str(self.cfg.get("panicButton","e") or "e")
+            takeover.bind(f"<KeyPress-{panic_key}>",lambda e:takeover.close())
+            takeover.focus_force()
+
+        threading.Thread(target=worker,daemon=True).start()
+
     def add_troubleshooting_tool(self):
         if self.current_section!="Troubleshooting": return
         # Tool card is added after settings; avoid duplicate by checking marker.
@@ -1971,9 +2195,19 @@ def _render(self,section):
     self.tool_added=False
     _original_render(self,section)
     if section=="Troubleshooting": self.add_troubleshooting_tool()
+    if section=="Internet": self.add_autoplay_link_tester()
 App.render=_render
 
 if __name__=="__main__":
+    if sys.version_info < (3, 12):
+        # Matches EdgewareSetup.bat's own check (fixed earlier to use
+        # sys.version_info instead of parsing text) - Edgeware needs 3.12+,
+        # and someone opening config.pyw directly (skipping the setup
+        # script, or on an old Python from before an upgrade) would
+        # otherwise get no warning at all until something obscure broke.
+        _version_root=tk.Tk(); _version_root.withdraw()
+        messagebox.showwarning(APP, f"You're running Python {sys.version_info.major}.{sys.version_info.minor}, but Edgeware needs 3.12 or newer. Things may not work correctly until you upgrade.")
+        _version_root.destroy()
     try: App().run()
     except Exception as e:
         root=tk.Tk(); root.withdraw(); messagebox.showerror(APP,f"Could not start the configuration manager.\n\n{e}"); root.destroy()
