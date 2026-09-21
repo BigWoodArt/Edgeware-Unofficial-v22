@@ -121,6 +121,8 @@ Entries are kept to 20 words or less.
 * A pack's own settings under Pack Priority were silently wiped out at corruption's first level - fixed.
 * New optional full-screen spiral overlay with paired binaural audio, reacting to session intensity with hard opacity/volume caps.
 
+**v22.2.25** - Fixed: Test Autoplay Link couldn't find libmpv on real Windows - missing DLL-directory setup other tools already had.
+
 **v22.2.24** - Config.pyw can now actually apply its own updates: download, backup code, apply, restart - not just notify.
 
 **v22.2.23** - New dev tool: paste a link in the Internet tab, test Web Video Takeover directly, close with your Panic key.

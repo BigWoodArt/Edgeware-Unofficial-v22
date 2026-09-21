@@ -1943,3 +1943,22 @@ untouched, skips creating a backup (since it fails before reaching that
 step), and still cleans up its temp directory despite the error.
 
 Version bumped to v22.2.24.
+
+## 52. v22.2.25 - real bug, confirmed by a report: "Test Autoplay Link" couldn't find libmpv on real Windows
+
+Reported directly, testing a real PMVHaven link: "Couldn't load the web
+video takeover code... Cannot find mpv-1.dll, mpv-2.dll or libmpv-2.dll in
+your system %PATH%." A real, confirmed bug, and one that should have been
+anticipated - this exact DLL-directory setup already exists elsewhere in
+config.pyw (`apply_schedule()`, `apply_startup_toggle()`), specifically
+because `os.add_dll_directory()`, not just `PATH`, is what's actually
+required for ctypes-based DLL loading to find libmpv on modern Python/
+Windows ("safe DLL search mode"). The new test tool's import chain
+(`features.web_video_takeover` -> `features.video_player`, which does
+`import mpv` at module level) needed the exact same setup and never got
+it. Audited the rest of config.pyw for the same gap - this was the only
+dynamic import touching anything mpv-related, so no other latent
+instances of it. Fixed, and re-verified the tool still works correctly
+end to end after the fix.
+
+Version bumped to v22.2.25.

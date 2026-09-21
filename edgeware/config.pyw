@@ -18,7 +18,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP = "Edgeware++ Configuration"
-VERSION = "22.2.24"
+VERSION = "22.2.25"
 # Points at this fork, not the original Araten/EdgewarePlusPlus repo - the
 # old config_original.pyw's legacy update-check still (deliberately) checks
 # upstream, since that's faithful to the original tool's behavior. This one
@@ -1985,6 +1985,19 @@ class App:
 
         src_path=str(HERE/"src")
         if src_path not in sys.path: sys.path.insert(0,src_path)
+        if str(DATA) not in os.environ.get("PATH",""):
+            os.environ["PATH"] += os.pathsep + str(DATA)
+        try:
+            # Same reason as apply_schedule()/apply_startup_toggle() above -
+            # this import chain (features.web_video_takeover ->
+            # features.video_player) does `import mpv` at module level,
+            # which needs libmpv-2.dll findable via a real DLL search
+            # directory, not just PATH, on modern Python/Windows. Missed
+            # this the first time this tool was built - confirmed directly
+            # by a real "Cannot find mpv-1.dll..." error report.
+            os.add_dll_directory(str(DATA))
+        except (AttributeError, OSError):
+            pass  # Not on Windows, or the directory doesn't exist yet
         try:
             from features.web_video_takeover import WebVideoTakeover, fetch_video_url
         except Exception as e:
