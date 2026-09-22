@@ -55,6 +55,13 @@ class VideoPlayer(Label):
         # (including whether the subprocess branch below captures
         # stderr at all) identical to before this existed.
         self.on_log_message: Callable[[str, str], None] | None = None
+        # Optional, opt-in hook: if set before play() is called, it's
+        # invoked (on the Tk main thread) once playback reaches its own
+        # natural end - not called at all if the video is looping (the
+        # default for every other caller) or if close() is what ended
+        # playback instead. Every existing caller leaves this None, which
+        # keeps behavior identical to before this existed.
+        self.on_playback_end: Callable[[], None] | None = None
         self.properties = {
             "loop": "inf",
             "hwdec": "auto" if self.settings.video_hardware_acceleration else "no",
@@ -137,6 +144,22 @@ class VideoPlayer(Label):
                 except Exception as e:
                     logging.warning(f"VideoPlayer: couldn't register playback-start callback: {e}")
 
+            if self.on_playback_end:
+                # Fires on any end-file event, not just a natural EOF -
+                # relies on the caller's own closed-state guard (see
+                # WebVideoTakeover.close()) to safely no-op when a
+                # close() call itself is what ended playback, rather
+                # than needing to parse mpv's own reason field for this
+                # event, whose exact shape isn't confirmed here.
+                try:
+
+                    @self.mpv.event_callback("end-file")
+                    def _on_end(_event: object, _callback: Callable[[], None] = self.on_playback_end) -> None:
+                        self.after(0, _callback)
+
+                except Exception as e:
+                    logging.warning(f"VideoPlayer: couldn't register playback-end callback: {e}")
+
             if overlay:
                 self.mpv.create_image_overlay().update(overlay)
 
@@ -205,6 +228,20 @@ class VideoPlayer(Label):
                             self.after(0, lambda lv=loglevel, c=component, m=message: self.on_log_message(lv, f"[{c}] {m}"))
 
                 Thread(target=read_mpv_log, daemon=True).start()
+
+            if self.on_playback_end:
+                # No mpv end-file event available from a separate process -
+                # the subprocess exiting on its own (rather than being
+                # killed by close()) is the equivalent signal here.
+                # self.process.wait() also returns after a kill() call, so
+                # this relies on the same closed-state guard as the
+                # in-process branch above to safely no-op in that case.
+                def watch_process_exit() -> None:
+                    self.process.wait()
+                    if self.on_playback_end:
+                        self.after(0, self.on_playback_end)
+
+                Thread(target=watch_process_exit, daemon=True).start()
 
             if overlay:
 

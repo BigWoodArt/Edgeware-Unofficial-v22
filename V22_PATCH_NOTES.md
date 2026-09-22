@@ -2356,3 +2356,196 @@ anything printed - is now actually visible when testing this way, rather
 than going to a console that was never attached in the first place.
 
 Version bumped to v22.2.36.
+
+## 64. v22.2.37 - No overlapping videos, popups stay above the video, and a likely explanation for "links just open normally"
+
+Reported directly: adding links to a real pack just opened the site
+normally, instead of taking over. Checked `open_web()`'s wiring first -
+it's unchanged and correct, still checking the takeover path before
+falling back to a plain browser tab. The much more likely explanation:
+`webVideoTakeover` defaults to off (0) in the shipped config, and the
+"Test Autoplay Link" dev tool never depended on that setting at all - it
+calls the takeover directly, bypassing the toggle entirely. That would
+explain the dev tool working perfectly while real packs did nothing:
+the setting most likely was just never turned on. Worth checking the
+Internet tab directly before anything else.
+
+Also asked for directly, and genuine gaps regardless of the above:
+
+**No overlapping videos.** `open_web_video_takeover()` now checks
+whether one is already playing before starting another - if so, that
+roll is skipped entirely (not overlapped, and not falling back to a
+browser tab either, since it would have been a video). A URL that isn't
+a supported site still falls back to a normal browser tab regardless of
+whether a video's currently playing - that fallback was never part of
+the "don't overlap videos" concern. Applied to both the direct-fetch
+path and the browser-extension fallback path, which create takeover
+windows independently of each other.
+
+**Popups now stay above the video.** Found the actual interaction:
+`Popup` already raises itself once, 50ms after its own creation,
+specifically to stay visible over other topmost windows - but
+`WebVideoTakeover`'s own periodic "stay on top" loop was re-asserting
+its topmost status every 250ms forever, which would periodically steal
+the top position back from a popup that appeared after the video did.
+Stopped that specific re-assertion (kept the loop's focus-forcing for
+Escape/close-button reliability, which doesn't re-raise a window's
+stacking position the way toggling -topmost does) - popups created after
+the video should now naturally stay above it via their own existing
+mechanism, without the video fighting to reclaim the top spot.
+
+Verified directly: starting a second takeover while one's already active
+correctly skips rather than overlapping or replacing it, and correctly
+leaves the original instance untouched; an unsupported URL still falls
+back to a normal browser tab regardless of whether a video is playing;
+and the relift loop no longer touches the -topmost attribute at all
+while still forcing focus each tick.
+
+Version bumped to v22.2.37.
+
+## 65. v22.2.38 - Likely fix for PMVHaven links still opening a browser tab: a second URL format was never matched
+
+Reported directly: with the setting enabled, RedGifs and Hypnotube both
+took over correctly through a real pack - confirming the overall wiring
+(the setting check, open_web(), the overlap guard) is genuinely correct
+- but PMVHaven links still just opened a browser tab. Isolated to one
+site specifically is a strong signal of a site-specific matching gap,
+not a general one.
+
+Found real evidence for exactly that in the page source already
+provided earlier: PMVHaven uses two different URL formats for the same
+video - the canonical, SEO-friendly `/video/title-slug_ID` (what was
+tested directly and confirmed working) and a second, shorter
+`/videos/ID` form referenced elsewhere on that same page (an
+`embedUrl` field). The site's own matching pattern only recognized the
+singular `/video/` form - a link in the plural `/videos/` form would
+silently never match at all, falling straight through to a normal
+browser tab exactly as reported.
+
+Widened the pattern to match both. Verified directly against both real
+URL formats. Flagged honestly rather than assumed: whether the
+extraction logic itself also works identically against that specific
+alternate page format isn't confirmed - available tools couldn't fetch
+that exact URL directly to check, since it was only ever seen as text
+embedded in an earlier upload, not from a real search or fetch. If
+PMVHaven links in this format still don't take over after this, that
+page's real source would be the next useful thing to check.
+
+Version bumped to v22.2.38.
+
+## 66. v22.2.39 - The other half of the popup-stacking fix: focus_force() was still stealing the foreground back
+
+Reported directly: popups did appear over the video, but got covered
+again almost immediately - specifically within about the same interval
+as the relift loop's own 250ms tick.
+
+The previous version only got half of this right. It stopped
+re-toggling -topmost on that loop specifically to stop fighting with
+popups for the top position, but kept calling focus_force() every tick
+on the assumption that forcing focus and raising a window's stacking
+position were separate concerns. On Windows specifically, they're not:
+forcing focus onto a window typically brings it to the foreground as a
+single, coupled operation - so the loop was still dragging the video
+back above any popup that had just appeared over it, just via a
+different property than before.
+
+Stopped the loop entirely once the window is actually revealed, rather
+than only changing what it does each tick. It's still useful during the
+brief tiny-corner phase before reveal - when nothing else should be
+competing for the foreground anyway, and mpv's own embedding is most
+likely to have just stolen focus - but there's no reason for it to keep
+running for the rest of a video's whole playback, fighting with popups
+that show up along the way.
+
+Verified directly, including over real elapsed time via actual Tk
+scheduling rather than just calling the methods directly: the loop
+correctly keeps running during the pre-reveal phase, and correctly stops
+completely - zero further focus_force calls - the moment the window is
+revealed.
+
+PMVHaven still opening a browser tab even after the widened URL pattern
+remains unresolved. Real data (the exact failing link, ideally with that
+page's own source) is the next thing needed to make real progress there
+rather than another guess.
+
+Version bumped to v22.2.39.
+
+## 67. v22.2.40 - The real PMVHaven fix: the page's own JSON-LD no longer carries a usable video URL at all
+
+Reported directly, with the real page's full view-source this time. That
+settled it precisely: neither of this page's two JSON-LD VideoObject
+blocks has a usable `.m3u8` contentUrl anymore - both just reuse it for
+the page's own canonical link instead. That's not a new site change
+either - it explains why the original JSON-LD-based extractor, written
+and tested against an earlier version of this exact page months ago,
+has been silently returning nothing on every real page tested since:
+the site's page structure changed sometime in between, and nothing here
+ever caught up.
+
+The real video data now loads client-side from the page's own
+`__NUXT_DATA__` payload - Nuxt's own flat, index-referenced
+serialization, not worth parsing generically. But the HLS master
+playlist URL still appears in there as one complete, literal JSON
+string, escaped forward slashes and all - a direct regex match on that,
+decoded through `json.loads()` to undo the `\u002F` escaping, gets it
+cleanly without resolving any indices at all. Replaced the old,
+consistently-failing JSON-LD extractor with this instead.
+
+Verified directly against the real page's structure: correctly matches
+and decodes the master playlist URL; correctly ignores the several
+quality-specific playlists (1080p.m3u8, 720p.m3u8, etc.) also present in
+the same payload, matching only the one ending in `master.m3u8`; and the
+full fetch-to-takeover pipeline runs end to end against a realistic
+mocked response with the video URL correctly extracted.
+
+This also likely explains, retroactively, why the earlier `/videos/ID`
+vs `/video/slug_ID` URL-format fix alone didn't resolve things: both
+formats serve the same underlying Nuxt page, so both were hitting this
+same broken extraction regardless of which URL format matched.
+
+Version bumped to v22.2.40.
+
+## 68. v22.2.41 - Fixed the video-repeats-forever bug, and a real mislabeled setting
+
+Reported directly: the takeover was replaying the same video on loop
+instead of the system moving on to a new one once it ended.
+`VideoPlayer` sets `loop: inf` by default for every caller - correct
+for a normal background-video popup, but never overridden for a video
+found and played once here. Overridden for this window specifically,
+the same way `hwdec` already is.
+
+Disabling the loop alone isn't quite enough on its own though - nothing
+was watching for the video's own natural end, so a non-looping video
+would just finish and sit on its last frame with the window still open
+rather than closing and letting a fresh roll happen. Added a third
+opt-in hook to `VideoPlayer`, `on_playback_end`, matching the same
+pattern as `on_playback_start` and `on_log_message`: in-process, mpv's
+own `end-file` event; subprocess mode, a thread watching for the
+subprocess to exit on its own (there's no mpv event to listen for
+across a separate process). `WebVideoTakeover` wires this straight to
+its own `close()`, so a video that actually finishes closes the window
+itself.
+
+One thing worth being careful about: a `close()` call from Panic kills
+the subprocess directly, and that same "process exited" signal fires
+either way, whether the exit was natural or forced - so the hook could
+easily double-fire after a Panic. `close()` is already idempotent
+(guards on `self.closed`), so it doesn't matter which one gets there
+first or if both do.
+
+Verified directly, including the specific race described above: a
+simulated natural end-of-file correctly closes the window in-process; a
+real spawned subprocess exiting naturally does the same; and a
+Panic-style kill fired while a fake subprocess is still "playing" does
+not raise or cause any problem even though the exit-watching thread
+fires afterward too - confirmed via Tkinter's own callback-exception
+hook rather than a naive call-count assertion, since the correct
+expectation here is "no problem happens," not "this only gets called
+once."
+
+Also fixed, unrelated but reported alongside it: the "Popup size"
+option was mislabeled - the underlying setting is `lkScaling`, which
+the engine itself already treats as `opacity`, not size at all. Relabeled
+in the UI to "Popup opacity" to match what it's always actually done.
+
+Version bumped to v22.2.41.

@@ -18,7 +18,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP = "Edgeware++ Configuration"
-VERSION = "22.2.36"
+VERSION = "22.2.41"
 # Points at this fork, not the original Araten/EdgewarePlusPlus repo - the
 # old config_original.pyw's legacy update-check still (deliberately) checks
 # upstream, since that's faithful to the original tool's behavior. This one
@@ -174,7 +174,7 @@ SECTIONS = {
         ("denialChance", "Popup denial chance", "Chance that a popup shows a blurred or pixelated image with teasing text over it, instead of showing normally. Does not affect how the popup closes.", "pct", None),
         ("buttonless", "Force buttonless popups", "Removes the normal close button from popups. Clicking the popup itself closes it instead.", "bool", None),
         ("multiClick", "Require multiple clicks", "Some popups may require more than one click before they close.", "bool", None),
-        ("lkScaling", "Popup size", "General popup size. 100 is normal size.", "pct", None),
+        ("lkScaling", "Popup opacity", "General popup opacity. 100 is fully opaque.", "pct", None),
         ("timeoutPopups", "Automatically close popups", "Lets popups close themselves after a timer.", "bool", None),
         ("popupTimeout", "Automatic close time", "How many seconds a popup stays before closing itself.", "sec", None),
         ("movingChance", "Moving popup chance", "Chance from 0 to 100 that a popup moves around the screen.", "pct", None),

@@ -121,6 +121,16 @@ Entries are kept to 20 words or less.
 * A pack's own settings under Pack Priority were silently wiped out at corruption's first level - fixed.
 * New optional full-screen spiral overlay with paired binaural audio, reacting to session intensity with hard opacity/volume caps.
 
+**v22.2.41** - Fixed videos looping forever instead of moving on. Also relabeled the mislabeled 'Popup size' setting to 'Popup opacity'.
+
+**v22.2.40** - Real PMVHaven fix: page's JSON-LD no longer has a usable video URL. Now pulls it from the page's own data.
+
+**v22.2.39** - Popups now actually stay on top - relift's focus_force() was still stealing the foreground back every tick.
+
+**v22.2.38** - Likely fix: PMVHaven's URL matching only recognized one of its two real URL formats. Widened it to match both.
+
+**v22.2.37** - Takeover no longer overlaps itself, and popups now stay above it. Check Internet tab - the setting defaults off.
+
 **v22.2.36** - Fixed a real app-freezing hang in VideoPlayer (same class of bug already fixed elsewhere). debug.py now runs the real config.
 
 **v22.2.35** - Real root cause found via the new diagnostics: hardware decoding was incompatible with the blur filter. Forced software decode.

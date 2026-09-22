@@ -78,19 +78,27 @@ def _extract_redgifs(html: str) -> str | None:
 
 
 def _extract_pmvhaven(html: str) -> str | None:
-    # Prefer the JSON-LD VideoObject block's contentUrl when it's the real
-    # media URL (some of this site's own JSON-LD blocks reuse contentUrl for
-    # the page's own canonical link instead - only trust one ending in the
-    # HLS manifest extension mpv actually needs).
-    for match in re.finditer(r'<script type="application/ld\+json">(.*?)</script>', html, re.DOTALL):
-        try:
-            data = json.loads(match.group(1))
-        except json.JSONDecodeError:
-            continue
-        content_url = data.get("contentUrl", "")
-        if data.get("@type") == "VideoObject" and content_url.endswith(".m3u8"):
-            return content_url
-    return None
+    # Confirmed directly against a real, current page: neither of this
+    # page's two JSON-LD VideoObject blocks carries a usable .m3u8
+    # contentUrl anymore - both just reuse it for the page's own
+    # canonical link instead, which is why the original JSON-LD-based
+    # version of this extractor was silently returning nothing on every
+    # real page tested here, despite working on an earlier version of
+    # this exact page months ago. The real video data now loads
+    # client-side from the page's own __NUXT_DATA__ payload - not worth
+    # parsing generically (Nuxt's own flat, index-referenced
+    # serialization), but the HLS master playlist URL still appears in
+    # there as one complete, literal JSON string, escaped forward
+    # slashes and all - a direct regex match on that, decoded through
+    # json.loads() to undo the \u002F escaping, gets it cleanly without
+    # resolving any indices.
+    match = re.search(r'"(https:\\u002F\\u002F[^"]*?master\.m3u8)"', html)
+    if not match:
+        return None
+    try:
+        return json.loads(f'"{match.group(1)}"')
+    except json.JSONDecodeError:
+        return None
 
 
 def _extract_hypnotube(html: str) -> str | None:
@@ -111,7 +119,7 @@ def _extract_hypnotube(html: str) -> str | None:
 # open-in-browser behavior, same as before this feature existed.
 SUPPORTED_SITES: list[tuple[re.Pattern, callable]] = [
     (re.compile(r"redgifs\.com/watch/"), _extract_redgifs),
-    (re.compile(r"pmvhaven\.com/video/"), _extract_pmvhaven),
+    (re.compile(r"pmvhaven\.com/videos?/"), _extract_pmvhaven),
     (re.compile(r"hypnotube\.com/video/"), _extract_hypnotube),
 ]
 
@@ -261,6 +269,17 @@ class WebVideoTakeover(Toplevel):
         # to work on at all; other popups are unaffected; this only
         # overrides hwdec for this one window's own properties.
         self.player.properties["hwdec"] = "no"
+        # Reported directly: the same video kept repeating instead of the
+        # system moving on to a new one. VideoPlayer sets loop: inf by
+        # default for every caller, which is correct for a normal
+        # background-video popup but not for a video found and played
+        # once here - overridden for this window specifically, the same
+        # way hwdec is just above. Paired with on_playback_end below,
+        # which closes this window itself once the (now non-looping)
+        # video actually finishes, so a fresh roll can play something new
+        # rather than leaving this one sitting on its last frame forever.
+        self.player.properties["loop"] = "no"
+        self.player.on_playback_end = self.close
 
         def _log_and_forward(level: str, message: str) -> None:
             # Real mpv diagnostic output - always logged (so it lands in
@@ -322,6 +341,7 @@ class WebVideoTakeover(Toplevel):
         # signal never arrives for some reason.
         self._reveal_geometry = (width, height, x, y)
         self._reveal_timer_id: str | None = None
+        self._revealed = False
         self.player.on_playback_start = self._reveal_now
         self.player.play(video_url)
 
@@ -344,6 +364,7 @@ class WebVideoTakeover(Toplevel):
     def _reveal(self, width: int, height: int, x: int, y: int) -> None:
         if self.closed:
             return  # Closed (e.g. via Panic) during the wait - nothing to reveal
+        self._revealed = True  # Stops _relift() below from rescheduling itself any further
         try:
             self.geometry(f"{width}x{height}+{x}+{y}")
         except TclError:
@@ -351,10 +372,25 @@ class WebVideoTakeover(Toplevel):
 
     def _relift(self) -> None:
         try:
-            if self.closed:
+            if self.closed or self._revealed:
+                # Reported directly: a popup would appear over the video
+                # briefly, then get covered again within a couple hundred
+                # milliseconds - exactly this loop's own interval. The
+                # previous version stopped re-toggling -topmost here
+                # specifically to let popups stay on top, but kept calling
+                # focus_force() every tick on the theory that forcing focus
+                # and raising a window's stacking position were separate
+                # concerns - on Windows specifically, they're not: forcing
+                # focus onto a window typically brings it to the foreground
+                # as a coupled operation, which was still stealing the top
+                # spot back from a popup that had just appeared above it.
+                # Only still useful during the brief tiny-corner phase
+                # before reveal, when nothing else should be competing for
+                # the foreground anyway and mpv's own embedding is most
+                # likely to have just stolen focus - stops entirely once
+                # revealed, rather than continuing to fight with popups for
+                # the rest of a video's whole playback.
                 return
-            self.attributes("-topmost", False)
-            self.attributes("-topmost", True)
             self.focus_force()
         except TclError:
             return  # Already destroyed
@@ -380,8 +416,17 @@ class WebVideoTakeover(Toplevel):
 
 
 def open_web_video_takeover(root: Tk, settings: Settings, state: State, url: str) -> bool:
-    """Returns True if this URL was handled as a takeover (caller should not
-    also open it in a browser tab), False if it's not a supported site."""
+    """Returns True if this URL was handled as a takeover, or if one was
+    already playing and this roll was skipped rather than starting a
+    second, overlapping video - either way the caller shouldn't also open
+    it in a browser tab. False only when the URL isn't a supported site
+    at all, in which case the caller falls back to its normal
+    browser-opening behavior exactly as before this feature existed -
+    unrelated to whether a video happens to be playing right now."""
+    if not is_supported_site(url):
+        return False
+    if state.web_video_takeover is not None and not state.web_video_takeover.closed:
+        return True  # Already one playing - skip this roll rather than overlapping it
     video_url, _detail, reveal_delay_ms = fetch_video_url(url)
     if not video_url:
         return False
@@ -417,12 +462,14 @@ class _TakeoverRequestHandler(http.server.BaseHTTPRequestHandler):
         # video URL's own origin if that's somehow missing.
         referer = referer_for(payload.get("pageUrl") or video_url)
         reveal_delay_ms = _estimate_reveal_delay_ms(_estimate_file_size_bytes("", video_url))
-        self.server.root.after(
-            0,
-            lambda: self.server.state.__setattr__(
-                "web_video_takeover", WebVideoTakeover(self.server.root, self.server.settings, video_url, referer=referer, reveal_delay_ms=reveal_delay_ms)
-            ),
-        )
+
+        def start_takeover() -> None:
+            state = self.server.state
+            if state.web_video_takeover is not None and not state.web_video_takeover.closed:
+                return  # Already one playing - skip rather than overlapping it, matching open_web_video_takeover()
+            state.web_video_takeover = WebVideoTakeover(self.server.root, self.server.settings, video_url, referer=referer, reveal_delay_ms=reveal_delay_ms)
+
+        self.server.root.after(0, start_takeover)
 
 
 def start_takeover_server(root: Tk, settings: Settings, state: State) -> http.server.HTTPServer | None:
