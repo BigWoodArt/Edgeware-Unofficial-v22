@@ -18,7 +18,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP = "Edgeware++ Configuration"
-VERSION = "22.2.25"
+VERSION = "22.2.36"
 # Points at this fork, not the original Araten/EdgewarePlusPlus repo - the
 # old config_original.pyw's legacy update-check still (deliberately) checks
 # upstream, since that's faithful to the original tool's behavior. This one
@@ -1969,7 +1969,7 @@ class App:
         card.pack(fill="x",padx=14,pady=3)
         inner=tk.Frame(card,bg=self.palette["panel2"]); inner.pack(fill="x",padx=10,pady=7)
         tk.Label(inner,text="Test Autoplay Link (dev)",bg=self.palette["panel2"],fg=self.palette["white"],font=("Segoe UI",10,"bold")).pack(anchor="w")
-        tk.Label(inner,text="Paste a link and press Test. If it's a supported site, the video plays fullscreen right here - press your Panic key to end the test.",bg=self.palette["panel2"],fg=self.palette["muted"],font=("Segoe UI",9),wraplength=560,justify="left").pack(anchor="w",pady=(1,6))
+        tk.Label(inner,text="Paste a link and press Test. If it's a supported site, the video plays fullscreen right here - press your Panic key, Escape, or the on-screen Close button to end it.",bg=self.palette["panel2"],fg=self.palette["muted"],font=("Segoe UI",9),wraplength=560,justify="left").pack(anchor="w",pady=(1,6))
         row=tk.Frame(inner,bg=self.palette["panel2"]); row.pack(fill="x")
         entry_var=tk.StringVar(self.root)
         entry=tk.Entry(row,textvariable=entry_var,bg=self.palette["panel"],fg=self.palette["white"],insertbackground=self.palette["white"],relief="flat")
@@ -1999,7 +1999,8 @@ class App:
         except (AttributeError, OSError):
             pass  # Not on Windows, or the directory doesn't exist yet
         try:
-            from features.web_video_takeover import WebVideoTakeover, fetch_video_url
+            from features.web_video_takeover import WebVideoTakeover, fetch_video_url, referer_for
+            from pynput import keyboard
         except Exception as e:
             self.autoplay_test_running=False
             messagebox.showerror(APP,f"Couldn't load the web video takeover code.\n\n{e}")
@@ -2009,14 +2010,16 @@ class App:
 
         def worker():
             video_url=None
+            detail=None
+            reveal_delay_ms=10000
             error=None
             try:
-                video_url=fetch_video_url(url)
+                video_url,detail,reveal_delay_ms=fetch_video_url(url)
             except Exception as e:
                 error=str(e)
-            self.root.after(0,lambda:finish(video_url,error))
+            self.root.after(0,lambda:finish(video_url,detail,reveal_delay_ms,error))
 
-        def finish(video_url,error):
+        def finish(video_url,detail,reveal_delay_ms,error):
             self.autoplay_test_running=False
             if error:
                 self.status.set("Test failed.")
@@ -2024,18 +2027,50 @@ class App:
                 return
             if not video_url:
                 self.status.set("Test failed.")
-                messagebox.showinfo(APP,"That's not a supported site, or it didn't return a playable video this way.")
+                messagebox.showinfo(APP,f"Couldn't get a playable video from that link.\n\n{detail or 'Unknown reason.'}")
                 return
-            self.status.set("Test playing - press your Panic key to end it.")
+            self.status.set("Test playing - press your Panic key, Escape, or the on-screen Close button to end it.")
             settings=SimpleNamespace(
                 mpv_subprocess=truth(self.cfg.get("mpvSubprocess",1)),
                 video_hardware_acceleration=truth(self.cfg.get("videoHardwareAcceleration",1)),
                 web_video_max_length=int(self.cfg.get("webVideoMaxLength",0) or 0),
             )
-            takeover=WebVideoTakeover(self.root,settings,video_url)
-            panic_key=str(self.cfg.get("panicButton","e") or "e")
-            takeover.bind(f"<KeyPress-{panic_key}>",lambda e:takeover.close())
+            mpv_errors_shown=[False]
+            def on_mpv_log(level,message):
+                if level in ("error","fatal") and not mpv_errors_shown[0]:
+                    mpv_errors_shown[0]=True
+                    messagebox.showwarning(APP,f"mpv reported an error while trying to play this:\n\n[{level}] {message}")
+            takeover=WebVideoTakeover(self.root,settings,video_url,referer=referer_for(url),reveal_delay_ms=reveal_delay_ms,on_log_message=on_mpv_log)
+
+            # Always-visible fallback: overrideredirect() strips all window
+            # chrome, so if every keybinding below somehow fails, this is
+            # the one thing that can never be blocked by lost focus or a
+            # hook not firing. Confirmed necessary directly - a bind()-only
+            # version of this left a real report with an unclosable
+            # fullscreen black window.
+            close_btn=tk.Button(takeover,text="Close (Esc)",command=takeover.close,bg="#E8546B",fg="white",relief="flat",font=("Segoe UI",10,"bold"),padx=10,pady=5)
+            close_btn.place(relx=1.0,rely=0.0,anchor="ne",x=-16,y=16)
+            takeover.bind("<Escape>",lambda e:takeover.close())
             takeover.focus_force()
+
+            # The real engine's Panic key is a global OS-level hook
+            # (pynput), not a Tkinter binding - reused here for real parity,
+            # and because a plain Tkinter bind() was confirmed NOT to fire:
+            # the embedded mpv video surface holds keyboard focus, so the
+            # Toplevel itself never sees the keypress. pynput's callback
+            # runs on its own thread, so closing has to be marshalled back
+            # onto the Tk main thread rather than touched directly from it.
+            panic_key=str(self.cfg.get("panicButton","e") or "e")
+            def on_key_press(key,_takeover=takeover):
+                try:
+                    if getattr(key,"char",None)==panic_key:
+                        self.root.after(0,_takeover.close)
+                        return False  # One-shot for this test - stop listening
+                except Exception:
+                    pass
+            listener=keyboard.Listener(on_press=on_key_press)
+            listener.daemon=True
+            listener.start()
 
         threading.Thread(target=worker,daemon=True).start()
 

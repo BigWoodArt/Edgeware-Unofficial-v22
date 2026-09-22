@@ -103,8 +103,8 @@ worth a look before relying on them:
 * Discord Rich Presence - never mentioned or tested at all.
 * Multi-click closing, Mood Set toggle - both active, unconfirmed.
 * Popup auto-close/fade timing - worth re-confirming visually.
-* Web Video Takeover - RedGifs/PMVHaven extraction tested, real playback isn't.
-* Hypnotube detector is a generic placeholder, not site-specific yet.
+* Web Video Takeover plays; the hwdec fix for blur-fill (v22.2.35) is unconfirmed.
+* Hypnotube extraction confirmed against real page source, playback isn't yet.
 * Self-update's real-Windows restart/file-overwrite: logic tested, not that.
 
 
@@ -120,6 +120,28 @@ Entries are kept to 20 words or less.
 * `config.pyw` rebuilt from the ground up for clear, full control over pack runs.
 * A pack's own settings under Pack Priority were silently wiped out at corruption's first level - fixed.
 * New optional full-screen spiral overlay with paired binaural audio, reacting to session intensity with hard opacity/volume caps.
+
+**v22.2.36** - Fixed a real app-freezing hang in VideoPlayer (same class of bug already fixed elsewhere). debug.py now runs the real config.
+
+**v22.2.35** - Real root cause found via the new diagnostics: hardware decoding was incompatible with the blur filter. Forced software decode.
+
+**v22.2.34** - Reverted a regression (last vf fix broke playback entirely). Added real mpv error diagnostics instead of guessing at syntax.
+
+**v22.2.33** - Real bug found: vf needed to be a list, like http-header-fields. Reverted keepaspect, which made stretching worse.
+
+**v22.2.32** - Likely fix for plain black sidebars on vertical video: disabled mpv's own aspect-fit, which was covering the intended blur.
+
+**v22.2.31** - Real playback-ready detection replaces the size guess: reveals the instant mpv actually starts rendering, in both mpv modes.
+
+**v22.2.30** - Reveal delay now scales with actual file size, not one flat number. Hypnotube gets a real direct extractor now.
+
+**v22.2.29** - No more visible black screen during startup - reused VideoPopup's tuck-in-a-corner-then-reveal trick, tuned for network video.
+
+**v22.2.28** - RedGifs confirmed working. PMVHaven fetch failures now show the real reason instead of a generic message.
+
+**v22.2.27** - Likely real fix for the black screen: the blur-fill filter needed mpv's lavfi=[...] wrapper, not bare syntax.
+
+**v22.2.26** - Fixed a real unclosable black-screen bug in Test Autoplay Link (Panic wasn't global) and a likely Referer-header playback fix.
 
 **v22.2.25** - Fixed: Test Autoplay Link couldn't find libmpv on real Windows - missing DLL-directory setup other tools already had.
 

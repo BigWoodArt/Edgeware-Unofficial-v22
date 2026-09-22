@@ -1962,3 +1962,397 @@ instances of it. Fixed, and re-verified the tool still works correctly
 end to end after the fix.
 
 Version bumped to v22.2.25.
+
+## 53. v22.2.26 - Real, serious bug fixed: an unclosable fullscreen black window, plus a likely fix for the playback failure itself
+
+Reported directly, testing a real PMVHaven link (the exact page's own
+view-source was provided): pasting the link produced a fullscreen black
+screen that did not respond to Panic. Two separate problems, both fixed.
+
+**The unclosable window (the serious one).** The test tool's Panic-key
+handling used a plain Tkinter `bind()` on the takeover window. That's
+fundamentally the wrong mechanism here: mpv's embedded video surface can
+hold keyboard focus, so a Tkinter-level binding on the parent window never
+sees the keypress at all - confirmed directly to be exactly what
+happened. The real engine's own Panic key was never at risk here, since
+`panic.py` uses a global, OS-level keyboard hook (`pynput`) that fires
+regardless of window focus - this bug was specific to the dev tool's
+simpler implementation, not the underlying feature. Fixed by switching
+the test tool to the same `pynput`-based global hook, adding Escape as a
+second, independent binding, and - since `overrideredirect(True)` strips
+all window chrome, meaning no keybinding failure should ever be able to
+leave someone with literally no way to close it - a small, always-visible
+"Close (Esc)" button in the corner as an unconditional fallback. The real
+production `WebVideoTakeover` also now periodically reclaims its own
+window focus (matching the exact pattern `panic.py`'s own
+`ask_panic_password()` already established for this same class of
+problem), as further defense in depth.
+
+**The black screen itself.** The video extraction was working correctly -
+confirmed directly against the real page source provided: the JSON-LD
+`VideoObject` block's `.m3u8` URL parses out exactly as expected. The
+likely cause of nothing actually playing: CDNs commonly reject a video
+request with no `Referer` header as hotlinking, and mpv sends none by
+default. Added a `referer_for()` helper that derives the correct Referer
+(the linking page's own origin) and passes it to mpv via its
+`http-header-fields` property, for both the direct-fetch sites (RedGifs,
+PMVHaven) and the extension-based path (deriving it from the page URL the
+extension itself reports). Verified directly: for the exact reported URL,
+the computed referer is `https://pmvhaven.com/`, and it's correctly
+threaded through to the player's properties before playback starts,
+including through the subprocess-mode serialization path. Real playback
+still isn't confirmed working end-to-end in this environment (no libmpv
+available to test against) - if the video still doesn't play after this,
+that's the next thing to verify.
+
+Verified directly: the close button is present with the correct label,
+and simulating an Escape keypress on the real takeover window correctly
+closes it.
+
+Version bumped to v22.2.26.
+
+## 54. v22.2.27 - Likely real cause of the black screen: the vf filter chain's own syntax, not headers
+
+Reported directly: the close button now works, but the black screen
+persists, identically, for both RedGifs (a direct .mp4) and PMVHaven (an
+HLS stream). That both fail the exact same way pointed away from the
+Referer fix from the previous version and toward something shared by
+every takeover regardless of video source - and there's exactly one such
+thing: the blur-fill `vf` filter chain, which is used nowhere else in
+this codebase, so it had no working precedent to check its syntax
+against.
+
+The likely bug: mpv's own `vf` option accepts either its own simple,
+comma-separated filter list, or a raw multi-pad FFmpeg-style filtergraph
+(split/overlay with labeled pads, exactly what this one is) - but only
+when wrapped in mpv's `lavfi=[...]` passthrough syntax. Passed bare, as
+it was, mpv can't parse it as a single filter at all. This fits the
+reported symptom precisely: a filter mpv can't apply fails silently deep
+inside its own library, producing a black screen with nothing for Python
+to catch or report - not a crash, not an error dialog, just nothing.
+Fixed by wrapping the whole filtergraph in `lavfi=[...]`.
+
+Also added a `User-Agent` header alongside the `Referer` fix from the
+previous version, sent via the same `http-header-fields` mechanism -
+mpv's own default is unlikely to match a real browser's, which some CDNs
+also check.
+
+Verified directly: the `vf` property now correctly reads
+`lavfi=[split[o][c];...]` rather than the bare, likely-unparseable
+filtergraph from before, and both headers are set correctly on the
+player. Real playback still isn't confirmed end to end in this
+environment (no libmpv available to test against) - this is the
+strongest available diagnosis, not a confirmed fix, and worth a direct
+re-test.
+
+Version bumped to v22.2.27.
+
+## 55. v22.2.28 - RedGifs confirmed working; PMVHaven now fails with a real, specific error instead of a guess
+
+Reported directly: RedGifs now plays correctly (confirms the lavfi fix
+from the previous version was real). The exact same PMVHaven link that
+worked earlier now fails after a few seconds with "unsupported site or no
+playable media" - a message that collapses several genuinely different
+failure modes (a timeout, an HTTP error from the site, or a page whose
+structure has changed) into one unhelpful line, making it impossible to
+tell which one actually happened without another round of guessing.
+Tried fetching the same URL directly to compare, but the available
+fetch tool returns extracted readable content, not the raw page source,
+so it couldn't confirm or rule out a structural change on its own.
+
+`fetch_video_url()` now returns a specific reason alongside a failure -
+a timeout, the exact HTTP status the site returned, a parse error, or
+(if the fetch succeeded but nothing matched) the page size and status
+that came back - and the test tool surfaces that detail directly in its
+error dialog instead of the generic line. Also added two standard
+browser headers (`Accept`, `Accept-Language`) alongside the existing
+User-Agent, on the reasonable chance the missing ones were part of what
+changed - cheap, harmless, and worth having regardless of whether it's
+the actual cause here.
+
+Verified directly: all four failure paths (unsupported site, timeout,
+HTTP error, fetched but no match) each produce their own specific,
+correct message, and a success still returns the video URL with no
+detail attached. The next failure report against this version should
+say exactly what happened rather than requiring another guess.
+
+Version bumped to v22.2.28.
+
+## 56. v22.2.29 - No more visible black screen during startup, using an already-proven pattern from VideoPopup
+
+Reported directly: PMVHaven now plays, but a real black fullscreen
+rectangle was visible for the whole ~10s network fetch + HLS buffering
+startup took. Stated bar: any length of delay is fine, as long as
+nothing visibly black shows up during it.
+
+This exact class of problem - a real gap between "window opens" and
+"player actually has something to show" - was already solved elsewhere
+in this codebase for local-file popups: `VideoPopup` opens as a tiny 2x2
+window tucked into a screen corner, creates the player at its real
+target size regardless, and only reveals the real fullscreen geometry
+after a short delay - so if there's a blank moment, it's an
+imperceptible dot in the corner, not a full black rectangle. Reused
+directly here, at a longer delay appropriate to network+HLS startup
+(VideoPopup's own 350ms is tuned for a local file and would reveal a
+network video's real window long before it's ready). The delay chosen
+(10s) matches the real-world startup time already reported, erring
+toward not revealing too early given delay length was explicitly not a
+concern.
+
+Also handled: if Panic (or the max-length timer) closes the window
+during that wait, the delayed reveal firing afterward is a safe no-op
+rather than touching an already-destroyed window.
+
+Verified directly: the window opens at a genuine 2x2 geometry rather
+than fullscreen, the reveal call correctly resizes it to the real target
+geometry, and triggering the reveal after the window has already been
+closed does not raise.
+
+Version bumped to v22.2.29.
+
+## 57. v22.2.30 - Calculated reveal delay based on actual file size, and Hypnotube gets a real, direct extractor
+
+**Calculated wait time.** The reveal delay is no longer one flat number
+for every video - it's now estimated from the video's actual size, which
+directly matches what was reported (4K taking longer than 720p). PMVHaven
+shows file size right on the page ("File Size: 152.12 MB"), read directly
+with no extra request; RedGifs and Hypnotube (direct .mp4s, not HLS) get
+a cheap HTTP HEAD request for Content-Length instead. Deliberately a
+rough proxy, not a precise calculation (a truly precise one needs
+bitrate, which needs a reliably available duration figure) - clamped
+between 2s and 20s so a huge file doesn't wait forever and a tiny one
+doesn't get revealed before anything's actually loaded. HLS's manifest
+has no single file size to measure, so PMVHaven falls back to the flat
+10s default when the page doesn't show a size directly.
+
+**Hypnotube now works via a real, direct extractor - no extension
+needed.** Fetched the exact Hypnotube URL from the real page source
+provided directly: a plain, cookieless request returns the real video
+page immediately, with the token-bearing `media.hypnotube.com` URL sitting
+right in a `<source>` tag - confirming the assumption behind the whole
+browser-extension approach (that a JS-driven age-gate blocks the server
+from returning real content) was wrong. Added a third direct-fetch
+extractor matching the RedGifs/PMVHaven pattern exactly, tested directly
+against the real page source. The extension/local-server path is left in
+place as a fallback rather than removed, in case a future site change
+brings back a real requirement for a live browser session, but the
+direct fetch is what actually runs now.
+
+Verified directly: the Hypnotube extractor correctly pulls the real video
+URL from the real page source; file-size-based delay estimation correctly
+produces a shorter delay for a smaller (720p-like) file than a larger
+(4K-like) one, with both extremes correctly clamped at 2s and 20s; the
+full pipeline (fetch → extract → estimate delay → build the takeover
+window with that delay) runs end to end without error for a Hypnotube
+URL.
+
+Version bumped to v22.2.30.
+
+## 58. v22.2.31 - Real playback-ready detection, not just a better guess
+
+Reported directly after the size-based delay shipped: still imperfect -
+some videos are audibly playing before the window reveals, others reveal
+before the video is actually ready. A size-based estimate was always
+going to have this problem, since it's still fundamentally a guess, not
+a check.
+
+Added a real one. `VideoPlayer` (shared by every video-playing feature,
+not just this one) gained an opt-in `on_playback_start` hook: when set
+before `play()`, it fires the moment mpv is genuinely decoding and
+rendering - mpv's own `playback-restart` event, not just "the URL
+resolved." In-process mode attaches this directly as a real mpv event
+callback. Subprocess mode has no direct channel back from the separate
+process, so `mpv_subprocess.py` now optionally touches a signal file the
+instant its own `playback-restart` fires, and the parent polls for it -
+an extra, fully optional argument on the subprocess command line that's
+only ever present when a caller actually asks for it, so every other
+popup's command line (and behavior) is completely unchanged. Verified
+directly: an ordinary `VideoPlayer` used exactly like every existing
+popup - never touching this hook at all - still plays and closes cleanly.
+
+`WebVideoTakeover` now uses this as the primary signal, revealing the
+instant it fires, with the size-based estimate from the previous version
+kept as a safety-net maximum wait in case the real signal doesn't arrive
+for some reason (an unsupported mpv/python-mpv version, a race, etc.) -
+whichever happens first wins.
+
+Verified directly: the in-process event callback registers and fires
+correctly, revealing the window early when simulated; the subprocess
+signal-file path is only added to the command line when the hook is
+actually set (confirmed byte-for-byte identical argument lists
+otherwise); the polling mechanism correctly detects a real signal file
+appearing and reveals in response; and the fallback timer still reveals
+correctly on its own if the real signal is never simulated at all.
+
+Version bumped to v22.2.31.
+
+## 59. v22.2.32 - Likely fix for plain black sidebars on vertical video instead of the intended blur
+
+Reported directly: with all three sites confirmed playing, vertical
+video's side "bars" were plain black rather than the blurred, filled
+background the vf filter chain already builds. Since the video plays at
+all (a filter mpv genuinely couldn't apply would black out the whole
+frame, not just the sides - confirmed by the earlier lavfi fix), the
+filter itself is running - the likely cause is mpv's own aspect-fit
+behavior padding the already-correct, already-16:9-shaped filtered frame
+a second time, based on the original portrait source's aspect ratio,
+covering the filter's own blur with mpv's separate, plain black padding
+on top of it.
+
+Set `keepaspect=no` on the player for this window specifically - the
+standard fix for exactly this class of double-letterboxing, telling mpv
+not to do its own additional aspect-fit on a frame the filter chain is
+already handling fill/aspect for on its own. Verified directly that the
+property is set correctly before playback starts.
+
+Version bumped to v22.2.32.
+
+## 60. v22.2.33 - The real bug: "vf" needed to be a list too, and the earlier "keepaspect=no" attempt made it worse
+
+Reported directly: after the keepaspect=no attempt, the tall video
+stretched to fill the wide screen instead of showing plain black bars.
+That's a very informative symptom - stretching (not aspect-preserving
+letterboxing) is exactly what happens when a *raw, unfiltered* frame
+gets keepaspect turned off. Put together with the previous report (plain
+black bars, no blur), the real picture became clear: the vf filter has
+never actually been applying at all. mpv was quietly playing the
+original, unfiltered portrait source the whole time - its own default
+aspect-keeping produced correct-but-unblurred black bars first, then
+just stretched that same raw source once that default was switched off.
+This also means the earlier "wrapping it in lavfi=[...] fixed the black
+screen" diagnosis was very likely wrong - the Referer header fix shipped
+in that same version was probably the actual fix that time.
+
+The real bug, following the exact same reasoning already confirmed
+correct for `http-header-fields`: `vf` is also a list-type mpv option
+(multiple `--vf` filters chain together), and python-mpv's list-option
+handling needs an actual Python list, not a bare string - a bare string
+is itself iterable character-by-character, which fits a filter that
+silently never takes effect rather than raising anything catchable.
+Fixed by wrapping the filter string in a list, matching how
+`http-header-fields` is already set.
+
+Also reverted the `keepaspect=no` change from last version - if the list
+fix above is what was actually needed, that was never the real problem,
+and if the filter still doesn't apply for some other reason,
+correct-aspect-with-black-bars (mpv's own default) is a smaller problem
+than the stretched, distorted video that turning it off actually
+produced.
+
+Verified directly: `vf` is now set as a one-element list rather than a
+bare string, `keepaspect` is no longer being overridden at all, and a
+full regression pass (Referer/User-Agent headers, corner-tuck start, the
+real playback-ready signal revealing early, idempotent close) still
+passes cleanly with these changes in place.
+
+Version bumped to v22.2.33.
+
+## 61. v22.2.34 - Reverted the regression, stopped guessing at vf syntax, added real mpv diagnostics instead
+
+Reported directly: the last version's "vf" list-wrapping attempt made
+things worse, not better - no video, no audio, just a black screen that
+waited out the reveal delay before showing nothing. That's consistent
+with the property assignment raising an exception before `.play()` was
+ever reached (the delay timer fires regardless of whether playback
+actually started, since it's an independent fallback, not a real
+readiness check by itself).
+
+Reverted "vf" back to the bare-string form from before that attempt -
+the last version that actually played something, even without the
+intended blur. Three guesses at this exact filter's syntax in a row have
+each been wrong in a different way, which is a sign to stop guessing.
+
+Instead, added real diagnostics. `VideoPlayer` gained a second opt-in
+hook, `on_log_message`, wired to mpv's own log output (filtered to
+warn-and-above) in both mpv modes: in-process via python-mpv's
+`log_handler` constructor argument directly; subprocess mode has
+`mpv_subprocess.py` always print its own warn-and-above log lines to
+stdout in a simple parseable format (harmless if nobody's listening,
+which is every other caller), captured only when a caller actually asks
+for it. `WebVideoTakeover` always forwards this through Python's own
+logging (so it lands in a real log file for the production engine,
+which already calls `init_logging()`), and the "Test Autoplay Link" dev
+tool now shows the first real mpv error directly in a dialog - also
+worth noting separately: config.pyw itself was never calling
+`init_logging()`, so `logging.warning()` calls made from anything it
+runs (this whole feature included) have likely been going to invisible
+stderr the entire time if it's being run without an attached console -
+worth keeping in mind for anything else reported as "silently doesn't
+work" from config.pyw specifically.
+
+Verified directly, extensively given the previous regression: `vf` is
+confirmed back to a bare string and `keepaspect` is no longer touched at
+all; the in-process log_handler correctly relays a simulated mpv error
+to an external callback; the subprocess-mode path was tested end-to-end
+with a real spawned process emitting real log lines over stdout,
+correctly captured and parsed; stdout is confirmed *not* captured at all
+when the hook isn't used (existing callers completely unaffected); and
+the test tool's error dialog is confirmed to show exactly once for the
+first error and not spam on repeats, with the real error text included.
+
+Version bumped to v22.2.34.
+
+## 62. v22.2.35 - The actual root cause, revealed by the diagnostics added last version: hardware decoding
+
+The mpv-error dialog added last version worked exactly as intended and
+surfaced the real problem immediately, on the first retest: "Impossible
+to convert between the formats supported by the filter 'Parsed_split_0'
+and the filter 'auto_scale_0'." That's the classic ffmpeg/libavfilter
+signature of hardware-decoded frames - a GPU-specific pixel format -
+hitting a software-only filter chain. `VideoPlayer` sets `hwdec: auto`
+by default whenever the person's general hardware-acceleration setting
+is on, and the blur-fill filter graph (split/scale/crop/gblur/overlay)
+is entirely software-side; it has no way to handle hardware surfaces
+without an explicit conversion step it was never given.
+
+Forced `hwdec: no` for this window specifically, regardless of the
+person's general setting - only this one window's own properties are
+touched, every other popup (which never runs this filter chain at all)
+is unaffected.
+
+This is the first version in this whole back-and-forth backed by an
+actual mpv error message rather than inference from a visual symptom -
+worth noting directly, since the last three attempts guessed wrong in
+three different ways before real diagnostics were available at all.
+
+Verified directly: `hwdec` is forced to "no" for this window even when
+the general hardware-acceleration setting is on, and a full regression
+pass (vf as a string, keepaspect untouched, Referer/User-Agent headers,
+corner-tuck start, real playback-start signal, idempotent close) still
+passes cleanly with this change in place.
+
+Version bumped to v22.2.35.
+
+## 63. v22.2.36 - Fixed a real app-freezing hang, plus debug.py now points at the actual current config
+
+Reported directly: Config's title bar faded the way Windows does for an
+unresponsive app, nothing ever appeared, had to close it manually - a
+real hang, not a silent failure.
+
+`VideoPlayer.play()` was the one remaining caller in the whole codebase
+still using `wait_visibility()` - a blocking call that enters a nested
+Tcl event loop and can freeze the *entire app*, not just the one window,
+if the visibility event never fires for any reason. This exact class of
+bug was already found and fixed elsewhere in this project a while back
+(`SpiralOverlay`, `Popup`), replacing it with `update_idletasks()` -
+`video_player.py` just never got the same fix applied at the time, since
+it wasn't the source of that earlier report. Applied the same,
+already-proven fix here too.
+
+Verified directly, and about as concretely as this kind of bug can be
+verified without reproducing the exact original trigger: called `play()`
+against a deliberately withdrawn (never-mapped) window - the exact
+scenario that could hang forever - and confirmed it now returns
+instantly rather than blocking. The old code would have hung this exact
+test the same way it hung one of this session's own earlier tests when
+the same mistake was made by accident.
+
+Also fixed `debug.py` (shared directly, useful beyond just this report):
+its "Config" option pointed at `main_config.py`, an old file superseded
+by `config.pyw` a while back and never updated to match. Now runs the
+real, current `config.pyw` directly. Since `debug.py` runs things via a
+terminal, this also means real Python output - tracebacks, warnings,
+anything printed - is now actually visible when testing this way, rather
+than going to a console that was never attached in the first place.
+
+Version bumped to v22.2.36.
