@@ -47,7 +47,7 @@ import traceback
 from tkinter import Tk, messagebox
 
 # Same set of third-party packages config.pyw checks for at startup - checked
-# here too, and before the ConfigWindow import below, since that import
+# here too, and before importing ConfigWindow below, since that import
 # itself would otherwise crash uncaught (raw traceback, no dialog) on a
 # fresh checkout that never had EdgewareSetup.bat run against it.
 REQUIRED_PACKAGES = {
@@ -75,14 +75,16 @@ if __name__ == "__main__":
     missing = [f"{name} ({REQUIRED_PACKAGES[name]})" for name in REQUIRED_PACKAGES if importlib.util.find_spec(name) is None]
     if missing:
         fix = "Run EdgewareSetup.bat in this folder to install everything automatically." if sys.platform == "win32" else "Run: pip install -r requirements.txt"
-        _root = Tk(); _root.withdraw()
-        messagebox.showerror("Edgeware++ Config", "This interface can't start - missing Python packages:\n\n  - " + "\n  - ".join(sorted(missing)) + f"\n\n{fix}")
+        _root = Tk()
+        _root.withdraw()
+        messagebox.showerror(
+            "Edgeware++ Config", "This interface can't start - missing Python packages:\n\n  - " + "\n  - ".join(sorted(missing)) + f"\n\n{fix}"
+        )
         _root.destroy()
         sys.exit(1)
 
-from config.window import ConfigWindow
+    from config.window import ConfigWindow
 
-if __name__ == "__main__":
     try:
         ConfigWindow()
     except Exception as e:
