@@ -324,14 +324,9 @@ class Popup(Toplevel):
             # cleanup loop was also closing it, from its own separately-
             # taken snapshot of state.popups. Closing an already-closed
             # popup must never raise: state.popups.remove(self) below would
-            # throw ValueError on a popup no longer in the list, which
-            # would abort Panic's entire cleanup loop partway through -
-            # confirmed directly as the cause of a real report where
-            # Panic (via the keyboard shortcut) left some popups and audio
-            # still running, requiring a second Panic attempt (via the
-            # external panic.pyw signal) to actually finish the job. A
-            # fast, overlapping burst of popups (a short hibernate test
-            # cycle, for instance) makes this race far more likely to hit.
+            # throw ValueError on a popup no longer in the list, aborting
+            # Panic's cleanup loop partway through and leaving popups and
+            # audio still running.
             return
         self.state.popup_number -= 1
         self.state.popups.remove(self)

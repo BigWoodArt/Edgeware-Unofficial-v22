@@ -77,7 +77,7 @@ if not pack.info.mood_file.is_file():
 
 class ConfigWindow(Tk):
     def __init__(self) -> None:
-        global config, vars
+        global vars
         super().__init__()
 
         # window things

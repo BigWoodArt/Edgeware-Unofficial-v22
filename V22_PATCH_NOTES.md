@@ -2549,3 +2549,63 @@ the engine itself already treats as `opacity`, not size at all. Relabeled
 in the UI to "Popup opacity" to match what it's always actually done.
 
 Version bumped to v22.2.41.
+
+## 69. v22.3.0 - Cleanup pass: dead code and stale comments removed, no behavior changes
+
+A maintenance release ahead of publishing v22 properly - no bug fixes, no new
+features, just clearing out code and comments left behind across many rounds
+of edits.
+
+**Dead code removed:**
+- `config.pyw`: `pack_candidates_from_zip()` (fully superseded by `import_pack()`'s
+  own inline logic) and `select_manager_theme()` (an empty stub, never called).
+- `config.pyw`: unused `import random` (only ever appeared inside string text,
+  never actually called).
+- `config.pyw`: `PARENT_CHILD["downloadEnabled"]` was defined twice - the first,
+  shorter list was silently overwritten by the second and never took effect.
+- `features/corruption.py`: `corruption_danger_check()` removed. It was fully
+  built (a pre-run warning dialog for dangerous full-permission corruption
+  settings) but never wired into `main_edgeware.py` or called from anywhere -
+  redundant with the other danger warnings that do run. Its now-unused imports
+  (`sys`, `messagebox`, `CONFIG_DANGER`, `DangerLevel`) were removed too.
+- `src/config/window/__init__.py`: `ConfigWindow.__init__` declared
+  `global config, vars` but never reassigns `config` in that scope - reads
+  don't need `global`. Trimmed to just `global vars`, which is reassigned.
+- `src/config/window/tabs/general/scheduling.py`: unused constant
+  `TIMER_TEXT = " "` removed.
+
+**Comments trimmed:** roughly a dozen spots across `config.pyw`,
+`features/misc.py`, `features/hibernate.py`, `features/popup.py`,
+`features/booru_scraper.py`, and `panic.py` rewrote comments that narrated
+past bugs, old code, or earlier revisions into comments that just explain
+what the current code does.
+
+Verified with `pyflakes` and a full-tree `ast.parse` syntax check after every
+change; confirmed against user testing that the program still runs correctly.
+
+Version bumped to v22.3.0.
+
+## 70. v22.3.1 - Setup-check parity for config_original, repo cleanup
+
+**New user protection extended to config_original:** `main_config.py` (what
+`config_original.pyw` launches) now runs the same missing-package check as
+`config.pyw`, before importing `ConfigWindow` - previously a fresh checkout
+without `EdgewareSetup.bat` run would crash on that import with a raw,
+unexplained traceback and no dialog at all (a `.pyw` has no console to show
+it in). Now shows the same friendly "here's what's missing, here's the fix"
+dialog and exits cleanly instead.
+
+**requirements.txt trimmed:** removed `sounddevice`, `tkcalendar`,
+`tktimepicker`, and `python-xlib` - verified nothing in the codebase imports
+any of them (static scan, dynamic-import scan, and checked they're not a
+transitive dependency of anything else required) before removing.
+
+**Repo cleanup:**
+- Removed `GNULicense.md` and `MITLicense.MIT` - byte-identical duplicates
+  of `COPYING` and `COPYING.MIT`, which are kept as the canonical files.
+- Removed `CHANGELOG.md` - the original v1-v21 changelog, superseded by this
+  file for everything v22 onward.
+- Replaced `screenshots/demo.png` with a current v22.3 screenshot, and added
+  it to the top of `README.md` so it renders on the repo's GitHub page.
+
+Version bumped to v22.3.1.

@@ -8,15 +8,11 @@ pyglet
 pynput
 pypresence
 pystray
-python-xlib; platform_system == 'Linux'
 pywin32; platform_system == 'Windows'
 requests
 ruff
 screeninfo
-sounddevice
-tkcalendar
 tkinter-tooltip
 tkinterweb
-tktimepicker
 ttkwidgets
 voluptuous

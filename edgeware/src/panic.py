@@ -182,13 +182,11 @@ def restore_panic_wallpaper() -> None:
         # We restore from the original wallpaper file rather than Edgeware's copy to avoid issues
         # when installed on a USB drive or after uninstalling.
         original = Path(Data.PANIC_WALLPAPER_LINK.read_text()).resolve()
-        # The content at `original` can drift from our saved snapshot for reasons
-        # having nothing to do with settings.replace_images (which this used to be
-        # gated behind): Windows itself regenerates its wallpaper cache file every
-        # time the desktop wallpaper changes, including every change Edgeware's own
-        # wallpaper cycling makes during a session. By the time Panic fires, that
-        # path can easily no longer contain the real original wallpaper at all - so
-        # this check now always runs, not just when Replace Images is on.
+        # The content at `original` can drift from our saved snapshot: Windows
+        # regenerates its wallpaper cache file on every wallpaper change,
+        # including Edgeware's own cycling during a session. By the time
+        # Panic fires, that path may no longer hold the real original
+        # wallpaper, so this check always runs.
         with original.open("rb") as of, saved.open("rb") as sf:
             was_overwritten = hashlib.file_digest(of, "sha256") != hashlib.file_digest(sf, "sha256")
         if was_overwritten:

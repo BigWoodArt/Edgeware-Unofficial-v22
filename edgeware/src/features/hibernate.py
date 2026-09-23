@@ -152,15 +152,12 @@ def start_main_hibernate(root: Tk, settings: Settings, pack: Pack, state: State,
     state._popup_number.attach(observer)
     state._hibernate_active.attach(observer)
 
-    # The spiral/binaural overlay are ambient layers meant to reflect an
-    # active session, not run underneath total silence - reported directly:
-    # they were starting immediately, before hibernate's first wake-up, since
-    # main_edgeware.py used to start them unconditionally regardless of
-    # hibernate mode. Now started here instead, once, in sync with the exact
-    # same delay as the first wake-up (computed once and reused for both,
-    # rather than each independently rolling its own random delay and
-    # drifting apart) - they fade in together with the first burst, then run
-    # continuously afterward as before, not restarted on later cycles.
+    # The spiral/binaural overlays are ambient layers meant to reflect an
+    # active session, not run underneath total silence, so they're started
+    # here in sync with the first wake-up's delay (computed once and reused
+    # for both, so they don't drift apart) rather than immediately. They
+    # fade in with the first burst, then run continuously, not restarted
+    # on later cycles.
     delay = random.randint(settings.hibernate_delay_min, settings.hibernate_delay_max)
     root.after(delay, lambda: state.__setattr__("spiral_overlays", handle_spiral_overlay(root, settings, pack)))
     root.after(delay, lambda: state.__setattr__("binaural_overlay", handle_binaural_overlay(root, settings, pack)))

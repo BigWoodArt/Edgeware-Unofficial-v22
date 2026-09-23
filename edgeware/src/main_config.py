@@ -40,9 +40,45 @@ if __name__ == "__main__":
     except (AttributeError, OSError):
         pass  # Not on Windows, or the directory doesn't exist yet
 
+import importlib.util
 import logging
+import sys
 import traceback
-from tkinter import messagebox
+from tkinter import Tk, messagebox
+
+# Same set of third-party packages config.pyw checks for at startup - checked
+# here too, and before the ConfigWindow import below, since that import
+# itself would otherwise crash uncaught (raw traceback, no dialog) on a
+# fresh checkout that never had EdgewareSetup.bat run against it.
+REQUIRED_PACKAGES = {
+    "mpv": "video/audio playback",
+    "PIL": "image handling",
+    "requests": "web features (booru search, checking for updates)",
+    "desktop_notifier": "desktop notifications",
+    "pystray": "the system tray icon",
+    "pynput": "the global panic hotkey",
+    "pyglet": "audio playback",
+    "pypresence": "Discord Rich Presence",
+    "screeninfo": "multi-monitor support",
+    "filetype": "media type detection",
+    "videoprops": "video file inspection",
+    "voluptuous": "config validation",
+    "booru": "booru image downloading",
+    "tkinterweb": "in-app web content",
+    "ttkwidgets": "this interface's mood checklist",
+    "tktooltip": "this interface's tooltips",
+}
+if sys.platform == "win32":
+    REQUIRED_PACKAGES["win32com"] = "Windows-specific integration"
+
+if __name__ == "__main__":
+    missing = [f"{name} ({REQUIRED_PACKAGES[name]})" for name in REQUIRED_PACKAGES if importlib.util.find_spec(name) is None]
+    if missing:
+        fix = "Run EdgewareSetup.bat in this folder to install everything automatically." if sys.platform == "win32" else "Run: pip install -r requirements.txt"
+        _root = Tk(); _root.withdraw()
+        messagebox.showerror("Edgeware++ Config", "This interface can't start - missing Python packages:\n\n  - " + "\n  - ".join(sorted(missing)) + f"\n\n{fix}")
+        _root.destroy()
+        sys.exit(1)
 
 from config.window import ConfigWindow
 

@@ -1,6 +1,6 @@
+import importlib.util
 import json
 import os
-import random
 import re
 import shutil
 import subprocess
@@ -18,11 +18,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP = "Edgeware++ Configuration"
-VERSION = "22.2.41"
-# Points at this fork, not the original Araten/EdgewarePlusPlus repo - the
-# old config_original.pyw's legacy update-check still (deliberately) checks
-# upstream, since that's faithful to the original tool's behavior. This one
-# checks our own repo since it's tracking our own version scheme.
+VERSION = "22.3.1"
+# Points at this fork's repo, not the original Araten/EdgewarePlusPlus repo.
 UPDATE_CHECK_URL = "https://raw.githubusercontent.com/BigWoodArt/Edgeware-Unofficial-v22/main/edgeware/config.pyw"
 UPDATE_RELEASES_URL = "https://github.com/BigWoodArt/Edgeware-Unofficial-v22"
 UPDATE_ZIP_URL = UPDATE_RELEASES_URL + "/archive/refs/heads/main.zip"
@@ -102,7 +99,6 @@ GELBOORU_FAMILY_SITES = {
 PARENT_CHILD = {
     "timeoutPopups": ["popupTimeout"],
     "rotateWallpaper": ["wallpaperTimer", "wallpaperVariance"],
-    "downloadEnabled": ["tagList"],
     "lkToggle": ["lkCorner"],
     "mitosisMode": ["mitosisStrength"],
     "hibernateMode": ["hibernateType", "hibernateMin", "hibernateMax", "wakeupActivity", "hibernateLength", "fixWallpaper"],
@@ -478,12 +474,8 @@ def _test_one_booru_site(site, tags, min_score, api_key, user_id, booru_scraper_
     exception - detail is the exception type/message, which for HTTP
     failures usually includes the status code, e.g. what would tell us
     Gelbooru wants auth or a site is dead server-side)."""
-    # The "booru" package's own idiom for zero results, confirmed against
-    # its source (utils/fetch.py, client/furbooru.py, client/paheal.py):
-    # raises a bare Exception or ValueError carrying this exact message,
-    # instead of returning an empty list. Caught a real run classifying
-    # these as FAIL when they're really the same thing as booru_scraper's
-    # "empty" case - not broken, just nothing matched these tags/score.
+    # The "booru" package raises this exact message for zero results,
+    # instead of returning an empty list - treat it as empty, not FAIL.
     NO_RESULTS_MESSAGE = "no results, make sure you spelled everything right"
     try:
         if site in GELBOORU_FAMILY_SITES:
@@ -585,15 +577,11 @@ class _ScheduleValue:
 
 
 def apply_schedule(cfg):
-    """Actually create/remove the Windows Task Scheduler entry for the
-    Scheduler feature. Saving the "schedule" key into config.json alone does
-    nothing - Edgeware's runtime never reads it either (this is a
-    config.pyw/original-UI-only feature, not a real Settings/Item, same
-    situation as apply_startup_toggle above). The original config window
-    only makes this work because it calls os_utils.set_schedule()/
-    delete_schedule() as a side effect of saving; config.pyw never did,
-    which is why toggling "Use a schedule" and saving previously did
-    nothing at all."""
+    """Create/remove the Windows Task Scheduler entry for the Scheduler
+    feature. Saving the "schedule" key into config.json alone does nothing -
+    Edgeware's runtime never reads it (config.pyw/UI-only feature, same as
+    apply_startup_toggle above), so this calls os_utils.set_schedule()/
+    delete_schedule() directly as a side effect of saving."""
     src_path = str(HERE / "src")
     if src_path not in sys.path:
         sys.path.insert(0, src_path)
@@ -636,27 +624,6 @@ def run_edgeware(pack_value=None):
 
 def key_to_display(value):
     return value or "Not set"
-
-
-def pack_candidates_from_zip(zpath):
-    with tempfile.TemporaryDirectory(prefix="edgeware_pack_") as td:
-        root = Path(td)
-        with zipfile.ZipFile(zpath) as z:
-            for info in z.infolist():
-                name = Path(info.filename)
-                if name.is_absolute() or ".." in name.parts:
-                    raise ValueError("The ZIP contains an unsafe file path and was not imported.")
-            z.extractall(root)
-        candidates = []
-        for p in [root, *[x for x in root.rglob("*") if x.is_dir()]]:
-            if (p / "index.json").is_file() or (p / "info.json").is_file() or (p / "img").is_dir():
-                candidates.append(p)
-        # Prefer the shallowest candidate, unless it is a resource folder inside a full Edgeware install.
-        candidates.sort(key=lambda p: (len(p.relative_to(root).parts), str(p).lower()))
-        candidate = candidates[0] if candidates else None
-        if candidate is None:
-            raise ValueError("I could not find a pack inside that ZIP. A pack normally contains index.json, info.json, or an img folder.")
-        return root, candidate
 
 
 def import_pack(parent):
@@ -1153,15 +1120,10 @@ class App:
         self.current_section=section
         for w in self.page.winfo_children(): w.destroy()
         self.row_widgets={}  # Per-tab only (unlike self.vars) - rebuilt fresh every render
-        # NOT resetting self.vars here (it used to be self.vars={}): that wiped
-        # every other tab's tracked widgets on each navigation, so collect() -
-        # called by every Save variant - could only ever see whatever tab
-        # happened to be open at that exact moment. Any change made on a tab
-        # you'd since navigated away from was silently discarded. Entries for
-        # the current tab's keys get overwritten below as normal; entries for
-        # other tabs' keys are left alone, and their bound Tkinter Variables
-        # keep their last-set value even after the widgets themselves are
-        # destroyed, so this is safe.
+        # self.vars is NOT reset here - it tracks every tab's widgets across
+        # navigation, so collect() sees changes on tabs you've left. Current
+        # tab's entries are overwritten below; other tabs' Variables keep
+        # their last-set value even after their widgets are destroyed.
         self.select_nav(section)
         self.refresh_packs()
         self.pack_overrides=read_pack_overrides(self.cfg.get("packPath"))
@@ -1540,11 +1502,9 @@ class App:
     def sync_setting(self,key,var,typ):
         """Write this one setting's current value into self.cfg immediately -
         not just at save time - so navigating away and back shows your last
-        edit, not your last save (previously the root cause of settings
-        appearing to silently revert when switching tabs without saving).
-        Also refreshes any dependent settings' grayed-out state. Mirrors
-        collect()'s per-type handling for a single key; collect() still runs
-        at save time too, as a redundant safety net."""
+        edit, not your last save. Also refreshes any dependent settings'
+        grayed-out state. Mirrors collect()'s per-type handling for a single
+        key; collect() still runs at save time too, as a safety net."""
         try:
             if typ=="bool":
                 value=1 if var.get() else 0
@@ -1676,7 +1636,7 @@ class App:
                 lbl.configure(bg=self.palette["accent_dark"] if var.get() else self.palette["panel3"])
                 sync()
             return flip
-        cols=6  # Now spans the full card width (see add_setting) instead of a narrow column, so this comfortably fits more per row
+        cols=6  # Spans the full card width (see add_setting)
         for i,site in enumerate(ALLOWED_BOORU_SITES):
             var=tk.BooleanVar(value=site in current)
             # Sites not yet rebuilt with the real scraper get dimmed text as a
@@ -1797,9 +1757,6 @@ class App:
     def manager_theme_changed(self,value):
         self.theme_name=value; self.palette=THEME_PALETTES[value]; self.cfg["_prettyConfigTheme"]=value; self.apply_manager_theme(); self.status.set(f"Manager appearance changed to {value}.")
 
-    def select_manager_theme(self):
-        pass
-
     def collect(self):
         for key,(var,typ) in self.vars.items():
             if typ=="bool":
@@ -1820,13 +1777,9 @@ class App:
             else: self.cfg[key]=var.get()
         self.cfg["_prettyConfigTheme"]=self.theme_name
         self.cfg["_configVersion"]=VERSION
-        # Pack overrides are no longer baked into the saved file here - see
-        # main_edgeware.py's apply_pack_priority(), which applies them fresh
-        # every time Edgeware actually runs (regardless of how it's
-        # launched) instead of at config-save time. This keeps what's saved
-        # here as your real preferences, so switching Priority back to
-        # Default Priority later restores them exactly, rather than
-        # restoring whatever a pack had clobbered them to.
+        # Pack overrides aren't baked in here - main_edgeware.py's
+        # apply_pack_priority() applies them fresh on every run, so what's
+        # saved stays the user's real preferences.
 
     def save(self,quiet=False):
         try:
@@ -2246,16 +2199,65 @@ def _render(self,section):
     if section=="Internet": self.add_autoplay_link_tester()
 App.render=_render
 
+# Import name -> what it's needed for, for every third-party package Edgeware
+# actually imports somewhere (config.pyw, config_original.pyw's interface, or
+# main_edgeware.py). Checked with find_spec (cheap - doesn't run the module),
+# not by actually importing, since config.pyw's own UI doesn't need most of
+# these itself.
+REQUIRED_PACKAGES = {
+    "mpv": "video/audio playback",
+    "PIL": "image handling",
+    "requests": "web features (booru search, checking for updates)",
+    "desktop_notifier": "desktop notifications",
+    "pystray": "the system tray icon",
+    "pynput": "the global panic hotkey",
+    "pyglet": "audio playback",
+    "pypresence": "Discord Rich Presence",
+    "screeninfo": "multi-monitor support",
+    "filetype": "media type detection",
+    "videoprops": "video file inspection",
+    "voluptuous": "config validation",
+    "booru": "booru image downloading",
+    "tkinterweb": "in-app web content",
+    "ttkwidgets": "the classic (config_original) interface's mood checklist",
+    "tktooltip": "the classic (config_original) interface's tooltips",
+}
+if sys.platform == "win32":
+    REQUIRED_PACKAGES["win32com"] = "Windows-specific integration"
+
+
+def check_setup_requirements():
+    """Warn (non-fatally - editing settings still works either way) if this
+    looks like a fresh checkout that never had EdgewareSetup.bat (or
+    `pip install -r requirements.txt`) run against it, so a new user finds
+    out now instead of from an unexplained crash the first time they hit
+    Run."""
+    missing = [f"{name} ({REQUIRED_PACKAGES[name]})" for name in REQUIRED_PACKAGES if importlib.util.find_spec(name) is None]
+    missing_mpv_dll = sys.platform == "win32" and not (DATA / "libmpv-2.dll").is_file()
+    if not missing and not missing_mpv_dll:
+        return
+
+    lines = []
+    if missing:
+        lines.append("Missing Python packages:\n  - " + "\n  - ".join(sorted(missing)))
+    if missing_mpv_dll:
+        lines.append("Missing data/libmpv-2.dll (needed for video/audio playback).")
+    fix = "Run EdgewareSetup.bat in this folder to install everything automatically." if sys.platform == "win32" else "Run: pip install -r requirements.txt"
+
+    root=tk.Tk(); root.withdraw()
+    messagebox.showwarning(APP, "Edgeware doesn't look fully set up yet:\n\n" + "\n".join(lines) + f"\n\n{fix}\n\nYou can still browse and change settings, but Run will likely fail until this is fixed.")
+    root.destroy()
+
+
 if __name__=="__main__":
     if sys.version_info < (3, 12):
-        # Matches EdgewareSetup.bat's own check (fixed earlier to use
-        # sys.version_info instead of parsing text) - Edgeware needs 3.12+,
-        # and someone opening config.pyw directly (skipping the setup
-        # script, or on an old Python from before an upgrade) would
-        # otherwise get no warning at all until something obscure broke.
+        # Matches EdgewareSetup.bat's check - Edgeware needs 3.12+, and
+        # someone opening config.pyw directly would otherwise get no
+        # warning until something obscure broke.
         _version_root=tk.Tk(); _version_root.withdraw()
         messagebox.showwarning(APP, f"You're running Python {sys.version_info.major}.{sys.version_info.minor}, but Edgeware needs 3.12 or newer. Things may not work correctly until you upgrade.")
         _version_root.destroy()
+    check_setup_requirements()
     try: App().run()
     except Exception as e:
         root=tk.Tk(); root.withdraw(); messagebox.showerror(APP,f"Could not start the configuration manager.\n\n{e}"); root.destroy()

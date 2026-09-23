@@ -16,12 +16,11 @@
 # along with Edgeware++.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
-import sys
 import time
-from tkinter import Tk, messagebox
+from tkinter import Tk
 
 import os_utils
-from config.items import CONFIG_DANGER, CORRUPTION_BLOCK, DangerLevel
+from config.items import CORRUPTION_BLOCK
 from config.settings import Settings
 from features.misc import send_notification
 from pack import Pack
@@ -29,48 +28,6 @@ from pack.data import MoodSet
 from paths import Data
 from roll import roll
 from state import State
-
-
-def corruption_danger_check(settings: Settings, pack: Pack) -> None:
-    if not (settings.corruption_mode and settings.corruption_full):
-        return
-
-    danger_levels = {
-        DangerLevel.EXTREME: [],
-        DangerLevel.MAJOR: [],
-        DangerLevel.MEDIUM: [],
-        DangerLevel.MINOR: [],
-    }
-
-    for level in pack.corruption_levels:
-        if level.config is None:
-            continue
-
-        for key, value in level.config.items():
-            danger = CONFIG_DANGER.get(key)
-            if not danger:
-                continue
-
-            warning = f"\n•{danger.warning or key}"
-            if danger.check(value) and warning not in danger_levels[danger.level]:
-                danger_levels[danger.level].append(warning)
-
-    danger_num = 0
-    warnings = ""
-    for level, dangers in danger_levels.items():
-        danger_num += len(dangers)
-        if dangers:
-            warnings += f"\n\n{level.value.capitalize()}{''.join(dangers)}"
-
-    if danger_num:
-        proceed = messagebox.askyesno(
-            "Corruption Config Warning",
-            "You are using corruption in full permission mode, meaning your pack is capable of changing Edgeware's settings.\n\n"
-            f"Your pack changes {danger_num} setting(s) which may be dangerous. Are you sure you want to proceed? {warnings}",
-            icon="warning",
-        )
-        if not proceed:
-            sys.exit()
 
 
 def next_corruption_level(settings: Settings, pack: Pack, state: State) -> int:

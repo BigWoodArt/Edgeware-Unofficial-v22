@@ -65,8 +65,7 @@ def send_notification(settings: Settings, pack: Pack, notification: str | None =
         attachment=Attachment(image) if roll(settings.notification_image_chance) and image else None,
     )
 
-    # This feels like the wrong way to do things, but it /is/ functionally what we were doing
-    # previously in instantiating a new DesktopNotifierSync with each call.
+    # Equivalent to instantiating a new DesktopNotifierSync per call.
     try:
         asyncio.run(asyncio.wait_for(task, timeout=0.5))
     except asyncio.TimeoutError:

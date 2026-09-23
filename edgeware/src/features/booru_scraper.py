@@ -16,13 +16,10 @@
 # along with Edgeware++.  If not, see <https://www.gnu.org/licenses/>.
 
 """Gelbooru-engine-family image search: JSON API first, HTML-scrape fallback
-when the API is unavailable or unusable, since relying on the API alone is
-exactly what broke (Gelbooru now requires auth the old code never sent;
-RealBooru's API is reported dead server-side). Covers sites confirmed or
-well-established to run this specific engine with the same index.php URL
-scheme - NOT every "-booru"-named site runs this (Paheal, for one, runs a
-different engine entirely with a different URL scheme, and is deliberately
-excluded here for that reason).
+for when the API is unavailable or unusable (e.g. requires auth, or dead
+server-side). Covers sites confirmed to run this specific engine with the
+same index.php URL scheme - NOT every "-booru"-named site runs this (Paheal,
+for one, runs a different engine with a different URL scheme).
 """
 
 import logging

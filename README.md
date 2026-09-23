@@ -1,5 +1,7 @@
 # Edgeware++ (v22 patch)
 
+![Edgeware++ Configuration window](screenshots/demo.png)
+
 **18+ only.** Edgeware++ is a fetish-designed program that spawns popups (images, video,
 audio, prompts, and more) over your screen, highly customizable via downloadable "packs."
 It can be ended at any time and scheduled for more passive use.
@@ -120,6 +122,10 @@ Entries are kept to 20 words or less.
 * `config.pyw` rebuilt from the ground up for clear, full control over pack runs.
 * A pack's own settings under Pack Priority were silently wiped out at corruption's first level - fixed.
 * New optional full-screen spiral overlay with paired binaural audio, reacting to session intensity with hard opacity/volume caps.
+
+**v22.3.1** - config_original now gets the same missing-package startup check as config.pyw. Trimmed unused requirements and repo files.
+
+**v22.3.0** - Cleanup pass: dead code and stale comments removed across config.pyw and src/. No behavior changes.
 
 **v22.2.41** - Fixed videos looping forever instead of moving on. Also relabeled the mislabeled 'Popup size' setting to 'Popup opacity'.
 
