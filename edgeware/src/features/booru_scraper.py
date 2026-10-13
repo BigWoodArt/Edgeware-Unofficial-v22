@@ -26,13 +26,21 @@ import logging
 import random
 import re
 import time
-from collections.abc import Iterator
-from urllib.parse import urljoin
+from collections.abc import Iterable, Iterator
+from pathlib import Path
+from urllib.parse import quote, urljoin, urlparse
 
 import requests
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-REQUEST_TIMEOUT = 10
+REQUEST_TIMEOUT = 5
+# Searches pick a random page from the first MAX_RANDOM_PAGE pages of results
+# instead of always taking page one, so repeated searches for the same tags
+# don't keep returning the same newest handful of posts.
+MAX_RANDOM_PAGE = 10
+# Gelbooru-engine listing pages are offset-based (pid = posts skipped), and
+# each page holds this many posts.
+HTML_PAGE_SIZE = 42
 RATE_LIMIT_SECONDS = 1.0
 
 GELBOORU_FAMILY_DOMAINS = {
@@ -63,11 +71,12 @@ def _get(url: str, domain: str) -> requests.Response:
     return requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=REQUEST_TIMEOUT)
 
 
-def _try_json_api(domain: str, tags: str, limit: int, api_key: str, user_id: str) -> list[dict] | None:
-    """Try the dapi JSON endpoint. Returns a list of post dicts, or None if
-    the API is unavailable or returned something unusable - the caller
-    should fall back to HTML scraping in that case, not give up."""
-    url = f"https://{domain}/index.php?page=dapi&s=post&q=index&json=1&tags={tags}&limit={limit}"
+def _try_json_api(domain: str, tags: str, limit: int, api_key: str, user_id: str, page: int = 0) -> list[dict] | None:
+    """Try the dapi JSON endpoint. Returns a list of post dicts (empty if the
+    page has none), or None if the API is unavailable or returned something
+    unusable - the caller should fall back to HTML scraping in that case,
+    not give up."""
+    url = f"https://{domain}/index.php?page=dapi&s=post&q=index&json=1&tags={quote(tags, safe='')}&limit={limit}&pid={page}"
     if api_key and user_id:
         url += f"&api_key={api_key}&user_id={user_id}"
     try:
@@ -87,19 +96,19 @@ def _try_json_api(domain: str, tags: str, limit: int, api_key: str, user_id: str
         posts = data
     else:
         return None
-    return posts or None
+    return posts
 
 
 _THUMB_BLOCK_RE = re.compile(r'<a[^>]*\bid="p(\d+)"[^>]*>\s*<img([^>]+)>', re.IGNORECASE)
 _ATTR_RE = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
 
 
-def _scrape_listing_html(domain: str, tags: str) -> list[str]:
+def _scrape_listing_html(domain: str, tags: str, page: int = 0) -> list[str]:
     """Fallback for when the JSON API is unavailable: scrape the ordinary
     search-listing page for post IDs. Returns post IDs only - the listing
     page doesn't carry a full-resolution URL or reliable score data, only
     thumbnails (see _resolve_full_image for the next step)."""
-    url = f"https://{domain}/index.php?page=post&s=list&tags={tags}&pid=0"
+    url = f"https://{domain}/index.php?page=post&s=list&tags={quote(tags, safe='')}&pid={page * HTML_PAGE_SIZE}"
     try:
         html = _get(url, domain).text
     except Exception as e:
@@ -115,6 +124,85 @@ def _scrape_listing_html(domain: str, tags: str) -> list[str]:
 _ORIGINAL_LINK_RE = re.compile(r'<a[^>]+href="([^"]+)"[^>]*>\s*Original(?:\s+image)?\s*</a>', re.IGNORECASE)
 _OG_IMAGE_RE = re.compile(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', re.IGNORECASE)
 _INLINE_IMAGE_RE = re.compile(r'<img[^>]+id="image"[^>]+src="([^"]+)"', re.IGNORECASE)
+
+
+_DOUBLE_SLASH_RE = re.compile(r"(https?://[^/]+)//+")
+
+
+def _fix_double_slash(url: str) -> str:
+    """Some sites' own markup (confirmed directly on RealBooru's post pages)
+    has an href with a doubled leading slash after the domain, which
+    urljoin() faithfully preserves rather than normalizes - collapse it so
+    the resulting URL actually resolves."""
+    return _DOUBLE_SLASH_RE.sub(r"\1/", url)
+
+
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+# Videos and other non-image files are skipped, not fatal - at most this many
+# candidates are examined before giving up, so a tag that mostly returns
+# videos can't turn one search into dozens of requests.
+MAX_URL_CANDIDATES = 5
+
+
+def is_image_url(url: str) -> bool:
+    return Path(urlparse(url).path).suffix.lower() in IMAGE_EXTENSIONS
+
+
+def first_image_url(urls: Iterable[str]) -> str | None:
+    """First still-image URL among the first MAX_URL_CANDIDATES of `urls`."""
+    for count, url in enumerate(urls, 1):
+        if is_image_url(url):
+            return url
+        if count >= MAX_URL_CANDIDATES:
+            break
+    return None
+
+
+def extract_file_url(post: dict) -> str | None:
+    """Full-size file URL from a post dict, whichever shape the site's API
+    uses: "file_url" (most), "file": {"url"} (e621 family), or
+    "representations": {"full"} (Derpibooru/Furbooru)."""
+    url = post.get("file_url")
+    if not url and isinstance(post.get("file"), dict):
+        url = post["file"].get("url")
+    if not url and isinstance(post.get("representations"), dict):
+        url = post["representations"].get("full")
+    return _fix_double_slash(url) if url else None
+
+
+def image_request_headers(url: str) -> dict[str, str]:
+    """Headers for fetching an image file. Some sites (RealBooru confirmed)
+    redirect any file request that doesn't come from their own pages to an
+    error page, so the Referer is the file's own site."""
+    parts = urlparse(url)
+    return {"User-Agent": USER_AGENT, "Referer": f"{parts.scheme}://{parts.netloc}/"}
+
+
+def verify_image_url(url: str, info: dict | None = None) -> tuple[bool, str]:
+    """Actually request `url` the way a real download would, and report
+    whether it serves an image. Returns (ok, detail-if-not). If `info` is
+    given, it's filled with what the server answered (status, content type,
+    final URL, redirect count) for logging."""
+    try:
+        response = requests.get(url, headers=image_request_headers(url), stream=True, timeout=REQUEST_TIMEOUT)
+    except Exception as e:
+        return False, f"request failed: {e}"
+    try:
+        if info is not None:
+            info.update(
+                status=response.status_code,
+                content_type=response.headers.get("Content-Type", ""),
+                final_url=response.url,
+                redirects=len(response.history),
+            )
+        if response.status_code >= 400:
+            return False, f"HTTP {response.status_code}"
+        content_type = response.headers.get("Content-Type", "").lower()
+        if not content_type.startswith("image/"):
+            return False, f"served {content_type or 'an unknown type'} instead of an image (ended at {response.url})"
+        return True, ""
+    finally:
+        response.close()
 
 
 def _resolve_full_image(domain: str, post_id: str) -> str | None:
@@ -140,15 +228,15 @@ def _resolve_full_image(domain: str, post_id: str) -> str | None:
             # internal site navigation, and it usually appears earlier in
             # the page than the real download link.
             continue
-        return urljoin(url, href)
+        return _fix_double_slash(urljoin(url, href))
 
     match = _OG_IMAGE_RE.search(html)
     if match:
-        return match.group(1)
+        return _fix_double_slash(match.group(1))
 
     match = _INLINE_IMAGE_RE.search(html)
     if match:
-        return urljoin(url, match.group(1))
+        return _fix_double_slash(urljoin(url, match.group(1)))
 
     logging.warning(f"booru scraper: no image URL found on {domain}#{post_id}'s post page - its markup may have changed")
     return None
@@ -156,7 +244,8 @@ def _resolve_full_image(domain: str, post_id: str) -> str | None:
 
 def search_gelbooru_family(site_name: str, tags: str, min_score: int, limit: int = 20, api_key: str = "", user_id: str = "") -> Iterator[str]:
     """Search a Gelbooru-engine-family site for images matching tags,
-    yielding image URLs one at a time as they're found/resolved, so a
+    yielding image URLs from a random page of results (see MAX_RANDOM_PAGE)
+    one at a time as they're found/resolved, so a
     caller can start downloading the first result immediately rather than
     waiting for a whole batch to resolve first. Score filtering only
     applies on the JSON API path - the HTML-scrape fallback has no
@@ -168,19 +257,26 @@ def search_gelbooru_family(site_name: str, tags: str, min_score: int, limit: int
     if not domain:
         return
 
-    posts = _try_json_api(domain, tags, limit, api_key, user_id)
-    if posts is not None:
+    page = random.randrange(MAX_RANDOM_PAGE)
+    posts = _try_json_api(domain, tags, limit, api_key, user_id, page)
+    if posts == [] and page > 0:
+        # Random page was past the end of this tag's results - use the first.
+        page = 0
+        posts = _try_json_api(domain, tags, limit, api_key, user_id, page)
+    if posts:
         random.shuffle(posts)
         for post in posts:
             score = post.get("score")
             if isinstance(score, (int, float)) and score < min_score:
                 continue
-            file_url = post.get("file_url")
+            file_url = extract_file_url(post)
             if file_url:
                 yield file_url
         return
 
-    post_ids = _scrape_listing_html(domain, tags)
+    post_ids = _scrape_listing_html(domain, tags, page)
+    if not post_ids and page > 0:
+        post_ids = _scrape_listing_html(domain, tags, 0)
     random.shuffle(post_ids)
     for post_id in post_ids:
         image_url = _resolve_full_image(domain, post_id)

@@ -64,7 +64,21 @@ class VideoPlayer(Label):
         self.on_playback_end: Callable[[], None] | None = None
         self.properties = {
             "loop": "inf",
-            "hwdec": "auto" if self.settings.video_hardware_acceleration else "no",
+            # "auto" (mpv's own default) lets it pick any hardware decoder
+            # advertised as available, including ones whose output surface
+            # isn't guaranteed compatible with the VO actually in use here -
+            # a well-documented mpv failure mode where decoding succeeds but
+            # the frame renders as solid black, since decode and render are
+            # separate steps and only the second one silently fails. This
+            # shows up more with an embedded window (wid, as below) than
+            # mpv's own native window. "auto-safe" is mpv's own recommended
+            # alternative for exactly this: it only enables a hardware
+            # decoder verified compatible with the current VO, falling back
+            # to software decoding otherwise, rather than one that merely
+            # exists. Reported directly as black mp4/WebM popups that play
+            # fine in another player (a different decode/render pipeline
+            # entirely, so unaffected by this).
+            "hwdec": "auto-safe" if self.settings.video_hardware_acceleration else "no",
             "input-cursor-passthrough": "yes",  # Required for buttonless closing
             # A candidate fix for a reported brief flash of a window with a
             # native title bar before a video popup properly appears -

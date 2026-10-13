@@ -16,17 +16,34 @@
 # along with Edgeware++.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
+import subprocess
 from pathlib import Path
 from threading import Thread
 from tkinter import TclError, Tk
 from typing import Callable
 
+import os_utils
+import videoprops
 from config.settings import Settings
 from features.popup import Popup
 from features.video_player import VideoPlayer
 from pack import Pack
 from state import State
 from videoprops import get_video_properties
+
+
+def _quiet_check_output(*args: object, **kwargs: object) -> str | bytes:
+    # videoprops launches ffprobe twice per call (a version check, then the
+    # real probe) with plain subprocess.check_output(). From a windowed
+    # (.pyw) app on Windows, each launch flashes a console window - the
+    # empty window seen just before a video appears. CREATE_NO_WINDOW
+    # suppresses it; only videoprops' own calls are affected.
+    if os_utils.is_windows():
+        kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
+    return subprocess.check_output(*args, **kwargs)
+
+
+videoprops.check_output = _quiet_check_output
 
 
 class VideoPopup(Popup):

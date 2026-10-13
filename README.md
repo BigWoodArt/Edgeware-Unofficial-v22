@@ -123,6 +123,16 @@ Entries are kept to 20 words or less.
 * A pack's own settings under Pack Priority were silently wiped out at corruption's first level - fixed.
 * New optional full-screen spiral overlay with paired binaural audio, reacting to session intensity with hard opacity/volume caps.
 
+**v22.3.6** - Candidate fix for the empty window flashing before videos.
+
+**v22.3.5** - Booru searches pick random pages for variety. RealBooru image downloads send a Referer, videos are skipped, and Derpibooru/Furbooru URLs now work. The site test checks that links serve images and logs more detail.
+
+**v22.3.4** - Candidate fix for black video popups. Subliminal message time is now correctly labeled in milliseconds, and its presets no longer make captions invisible.
+
+**v22.3.3** - Added Show on Discord to config.pyw. Booru image fetching now runs on a background thread instead of freezing the UI.
+
+**v22.3.2** - Fixed image popups sometimes not closing immediately, spiral overlay capped at 33% (was 50%), and real bugs in the booru scraper (unencoded tags, malformed RealBooru/Rule34 URLs).
+
 **v22.3.1** - config_original now gets the same missing-package startup check as config.pyw. Trimmed unused requirements and repo files.
 
 **v22.3.0** - Cleanup pass: dead code and stale comments removed across config.pyw and src/. No behavior changes.

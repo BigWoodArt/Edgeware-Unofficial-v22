@@ -17,8 +17,10 @@
 
 import asyncio
 import logging
+from collections.abc import Iterator
 from pathlib import Path
 from random import choice, randint
+from threading import Thread
 from tkinter import Label, TclError, Tk
 from typing import Callable
 
@@ -26,6 +28,7 @@ import booru
 import requests
 from config.settings import Settings
 from features import booru_scraper
+from features.booru_scraper import MAX_RANDOM_PAGE, REQUEST_TIMEOUT
 from features.popup import Popup
 from features.video_player import VideoPlayer
 from pack import Pack
@@ -105,31 +108,67 @@ def download_booru_image(settings: Settings) -> str | None:
 
     if site in booru_scraper.GELBOORU_FAMILY_DOMAINS:
         try:
-            for url in booru_scraper.search_gelbooru_family(
-                site, settings.booru_tags, settings.booru_min_score, api_key=settings.booru_api_key, user_id=settings.booru_user_id
-            ):
-                return url  # Already shuffled inside search_gelbooru_family() - first is as good as random
+            # Already shuffled inside search_gelbooru_family() - first is as good as random
+            return booru_scraper.first_image_url(
+                booru_scraper.search_gelbooru_family(
+                    site, settings.booru_tags, settings.booru_min_score, api_key=settings.booru_api_key, user_id=settings.booru_user_id
+                )
+            )
         except Exception as e:
             logging.warning(f'booru_scraper failed for "{site}": {e}')
         return None
 
     site_obj = getattr(booru, site)()
-    results = booru.resolve(asyncio.run(site_obj.search(query=settings.booru_tags, limit=20)))
+    # Random page for variety; if it's past the end of this tag's results
+    # (or otherwise fails), fall back to the first page.
+    page = randint(1, MAX_RANDOM_PAGE)
+    results = None
+    for attempt in (page, 1) if page > 1 else (1,):
+        try:
+            results = booru.resolve(asyncio.run(asyncio.wait_for(site_obj.search(query=settings.booru_tags, limit=20, page=attempt), timeout=REQUEST_TIMEOUT)))
+        except Exception as e:
+            logging.warning(f'"booru" package search failed for "{site}" (page {attempt}): {e}')
+            results = None
+        if results:
+            break
     if not results:
         return None
 
+    return booru_scraper.first_image_url(_candidate_urls(results, settings.booru_min_score))
+
+
+def _candidate_urls(results: list[dict], min_score: int) -> Iterator[str]:
     for post in results:
         score = post.get("score")
-        if isinstance(score, (int, float)) and score < settings.booru_min_score:
+        if isinstance(score, (int, float)) and score < min_score:
             continue
-        try:
-            return post["file_url"]
-        except KeyError:
-            try:
-                return post["file"]["url"]
-            except (KeyError, TypeError):
-                continue
-    return None
+        url = booru_scraper.extract_file_url(post)
+        if url:
+            yield url
+
+
+def _fetch_booru_image(settings: Settings) -> Image.Image | None:
+    """The actual network+decode work behind the booru_download setting -
+    pulled out of ImagePopup.__init__ so it can run on a worker thread
+    instead of Tkinter's single main thread. Returns None on any failure
+    (bad site, network error, no results), same "never raises, caller falls
+    back to local media" contract as download_booru_image itself. Fully
+    decodes the image (.load()) before returning, rather than handing back
+    a lazy PIL Image still backed by the HTTP response stream, so nothing
+    about the network connection needs to stay alive past this function -
+    the caller can safely use the result on a different thread, later."""
+    try:
+        url = download_booru_image(settings)
+        if not url:
+            raise ValueError("No qualifying results")
+        data = requests.get(url, headers=booru_scraper.image_request_headers(url), stream=True, timeout=REQUEST_TIMEOUT)
+        data.raise_for_status()
+        image = Image.open(data.raw)
+        image.load()
+        return image
+    except Exception:
+        logging.error(f'No results for tags "{settings.booru_tags}" on {settings.booru_sites}')
+        return None
 
 
 class ImagePopup(Popup):
@@ -138,20 +177,38 @@ class ImagePopup(Popup):
         self.hypno = roll(settings.hypno_chance)
         if not self.should_init():
             return
-        super().__init__(root, settings, pack, state, on_close)
 
-        if self.settings.booru_download and roll(50):
-            try:
-                url = download_booru_image(self.settings)
-                if not url:
-                    raise ValueError("No qualifying results")
-                data = requests.get(url, stream=True)
-                image = Image.open(data.raw)
-            except Exception:
-                logging.error(f'No results for tags "{self.settings.booru_tags}" on {self.settings.booru_sites}')
-                image = Image.open(self.media)
+        if settings.booru_download and roll(50):
+            # The actual network fetch (and everything the rest of __init__
+            # needs the fetched image for) used to happen right here, inline,
+            # on Tkinter's single main thread - meaning a slow or stalled
+            # booru site froze the entire UI until it resolved, including
+            # already-registered clicks on other, unrelated popups (reported
+            # directly as "Close doesn't work"). Popup creation itself still
+            # can't happen off the main thread (Tkinter widgets aren't
+            # thread-safe to create), so only the network I/O + image decode
+            # - the actually slow part - moves to a worker thread; the popup
+            # is then finished on the main thread exactly as before, via
+            # root.after(), once that thread has an image ready one way or
+            # another. No caller depends on ImagePopup(...) returning a
+            # fully-initialized popup synchronously (every call site either
+            # discards the return value or reacts to state.popup_number
+            # ticking up later, not to this call returning) - see the
+            # v22.3.2 patch notes entry this replaces for why a plain
+            # timeout wasn't a full fix.
+            def fetch_then_finish() -> None:
+                image = _fetch_booru_image(settings) or Image.open(self.media)
+                try:
+                    root.after(0, lambda: self._finish_init(root, settings, pack, state, on_close, image))
+                except (TclError, RuntimeError):
+                    pass  # root was torn down (e.g. Panic) while this was in flight
+
+            Thread(target=fetch_then_finish, daemon=True).start()
         else:
-            image = Image.open(self.media)
+            self._finish_init(root, settings, pack, state, on_close, Image.open(self.media))
+
+    def _finish_init(self, root: Tk, settings: Settings, pack: Pack, state: State, on_close: Callable[[], None] | None, image: Image.Image) -> None:
+        super().__init__(root, settings, pack, state, on_close)
         self.compute_geometry(image.width, image.height)
         logging.info(f'Image popup: "{self.media.name}" (corruption level {self.state.corruption_level}) at ({self.x}, {self.y}), monitor {self.monitor.name}')
 
@@ -191,11 +248,13 @@ class ImagePopup(Popup):
                 self.player = VideoPlayer(self, self.settings, self.width, self.height)
                 self.player.properties["video-scale-x"] = max(self.width / self.height, 1)
                 self.player.properties["video-scale-y"] = max(self.height / self.width, 1)
-                # NOTE: same ffmpeg limitation as above applies here in theory if
-                # a pack's hypno asset happens to be an animated WebP rather than
-                # a GIF, since this still goes through mpv unconditionally. Not
-                # fixed here since the reported bug was about img-folder popups;
-                # flagging for anyone who hits it with hypno/subliminal assets.
+                # NOTE: this same ffmpeg limitation would apply here too if a
+                # pack's hypno asset were an animated WebP rather than a GIF -
+                # Pack.random_hypno() filters those out at pack-load time
+                # instead (see _is_unplayable_hypno_asset in pack/__init__.py),
+                # since neither this popup nor spiral_overlay.py's full-screen
+                # overlay has a native-Pillow fallback the way this file's own
+                # img-folder path does above.
                 final.putalpha(int((1 - self.settings.hypno_opacity) * 255))
                 self.player.play(self.pack.random_hypno(), final)
             else:

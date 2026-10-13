@@ -2609,3 +2609,147 @@ transitive dependency of anything else required) before removing.
   it to the top of `README.md` so it renders on the repo's GitHub page.
 
 Version bumped to v22.3.1.
+
+## 71. v22.3.2 - Image popup close-button hang, spiral overlay intensity, Realbooru/booru scraper fixes
+
+**Fixed: image popups sometimes not closing immediately on click.** The
+close button itself was always fine - the real cause was a synchronous
+booru-image network request with no timeout, running on the single Tk main
+thread during popup creation. A slow or stalled connection there froze the
+entire UI, including an already-registered close click, until the request
+resolved. `image_popup.py`'s `requests.get()` now has the same timeout
+every other network call in the codebase already had, and the "booru"
+package's own async search is now wrapped with a timeout too (it previously
+had none at all, and wasn't even caught - a real failure there would have
+crashed popup creation outright instead of falling back to the pack's local
+image). Timeout set to 5s (down from the usual 10s elsewhere) to keep any
+one hang short; a full fallback chain on Gelbooru-family sites is still up
+to three sequential 5s-capped calls in the worst case. A hard ceiling needs
+a shared deadline threaded through that whole chain, not just per-call
+timeouts - left for a later backend pass.
+
+**Spiral overlay opacity cap lowered from 50% to 33%,** still scaling
+linearly with hypno chance. Updated in `spiral_overlay.py` (logic,
+constant, and docstring) and the matching tooltip in `config.pyw`.
+
+**Fixed a real bug in the booru scraper:** tag strings were being dropped
+into Gelbooru-family API/HTML query strings completely unencoded, in both
+`_try_json_api` and `_scrape_listing_html`. Any tag list containing a
+space, comma, or symbol broke the query string on any Gelbooru-family
+site's dapi request, which could make a live API look "offline" and force
+a fall-through to the far more fragile HTML-scrape path. Now properly
+URL-encoded with `quote()`. This is very likely the real root cause behind
+RealBooru producing a broken image link, since it's exactly the kind of
+failure that forces the API-first path to give up early.
+
+Also fixed a doubled leading slash (`domain.com//images/...`) that some of
+these sites' own post-page markup produces, which `urljoin()` was
+faithfully preserving instead of normalizing - confirmed on both RealBooru
+and (previously unreported, same bug) Rule34's URLs.
+
+**Test Download Sites dialog now shows a real URL for every site**,
+including ones that go through the third-party `booru` package (Danbooru,
+Derpibooru, E621, etc.) - previously those only showed a result count.
+Uses the exact same `file_url`/`file.url` extraction real downloads
+already use, so what the test shows is what a real popup would get.
+
+Version bumped to v22.3.2.
+
+## 72. v22.3.3 - Show on Discord added to config.pyw, booru fetch moved off the main thread
+
+**"Show on Discord" is now in config.pyw.** This setting already worked
+fully at the runtime level (main_edgeware.py/misc.py's handle_discord) and
+was already exposed in config_original's interface, but the new config.pyw
+never had UI for it. Added to the Internet tab with the same danger-flag
+treatment (embarrassment risk on a main account) as config_original gives
+it.
+
+**Fixed the booru scraper hang at its root, not just its symptom.**
+v22.3.2 added a 5s timeout to stop indefinite hangs, but any successful
+(or slowly-failing) request still blocked the entire UI for however long
+it took, since it ran inline on Tkinter's single main thread.
+`ImagePopup.__init__` now does the actual network fetch and image decode
+on a background thread; only the popup's construction itself (which has to
+happen on the main thread - Tkinter widgets aren't thread-safe to create)
+is marshaled back via `root.after()` once an image is ready. Other popups'
+clicks, including Close, are never blocked while a booru fetch is in
+flight, regardless of how long it takes. Confirmed no caller depends on
+`ImagePopup(...)` returning a ready popup synchronously before making this
+change.
+
+Version bumped to v22.3.3.
+
+## 73. v22.3.4 - Black video popups, subliminal caption unit fix
+
+**Black mp4/WebM popups (candidate fix).** `VideoPlayer` used mpv's
+`hwdec: "auto"`, which can pick a hardware decoder whose output surface
+isn't compatible with the active video output when embedded via `wid`.
+Decoding succeeds but the frame renders solid black; other players (a
+different pipeline) play the same files fine. Changed to `auto-safe`, which
+only enables hardware decoders verified compatible with the current output
+and falls back to software otherwise. Unverified against the reported
+files - if black popups persist, turn off "Use video hardware acceleration"
+in Troubleshooting. Its tooltip now mentions black videos.
+
+**Fixed: "Subliminal message time" was labeled seconds but is milliseconds.**
+The runtime passes `capPopTimer` straight to Tk's `after()` (ms), default
+300, and config_original labels it "(ms)". config.pyw typed it as seconds,
+and its four intensity presets set 3, 3, 2 and 2 - i.e. 2-3 ms, effectively
+invisible captions. Now typed as ms with a matching tooltip, and presets set
+to 300, 300, 250 and 200. Every other seconds-typed setting was checked
+against the runtime and is correct (they convert with `s_to_ms`).
+
+Version bumped to v22.3.4.
+
+## 74. v22.3.5 - Booru variety, RealBooru hotlink fix, Derpibooru/Furbooru URLs, richer test log
+
+**Booru searches now vary.** Every search used to take page one of the
+results (about 20 posts) and shuffle within it, so the same images kept
+coming back. Each search now picks a random page from the first 10, and
+falls back to page one if that page is empty. Applies to both the
+Gelbooru-family scraper (JSON `pid`, and the HTML listing offset) and the
+third-party `booru` package path. Tags with fewer than 20 posts still repeat,
+since there's nothing more to pick from.
+
+**RealBooru file links (candidate fix).** RealBooru redirects any file
+request that doesn't look like it came from its own pages to
+`hotlink.php`, which answers "No image hash supplied" - including a link
+pasted into a browser, which is why the log's link looked broken. Image
+downloads now send a browser User-Agent and a Referer set to the file's own
+site (the same approach the separate RealBooru scraper uses), and check the
+HTTP status. Not verifiable from the build environment; Test Download Sites
+now checks it directly (below).
+
+**Videos are skipped.** Some sites return `.webm`/`.mp4` posts, which an
+image popup can't show. Searches now take the first still image among the
+first 5 candidates instead of the first result of any kind.
+
+**Derpibooru and Furbooru real downloads were silently falling back to
+local images.** Their API puts the URL under `representations.full`, which
+the extraction never read. One shared `extract_file_url()` now handles all
+three response shapes and is used by both popups and the test dialog.
+
+**Test Download Sites is stricter and its log is more detailed.** It picks a
+still image, then requests the link like a real download; a link that
+doesn't serve an image now shows FAIL with the reason and where it ended
+up, instead of OK. The saved log adds: Edgeware/Python/platform versions,
+`booru`/`requests`/Pillow versions, selected sites and whether an API key
+or user ID is set (not their values), an ok/empty/fail summary, and per
+site the engine used, posts returned, image HTTP status/content
+type/redirects/final URL, elapsed time, and a traceback on failures.
+
+Version bumped to v22.3.5.
+
+## 75. v22.3.6 - Console window flash before videos (candidate fix)
+
+`video_popup.py` reads each video's size with `videoprops.get_video_properties()`,
+which launches ffprobe twice (a version check, then the real probe) through
+plain `subprocess.check_output()`. From a windowed (`.pyw`) app on Windows,
+each launch opens a console window for a moment - the empty window that
+flashed just before a video appeared. Both launches now pass
+`CREATE_NO_WINDOW` (only videoprops' own calls are affected). The mpv helper
+process already had that flag. Untested on Windows from the build
+environment; if a flash remains, report whether it still happens with
+"Run mpv in a subprocess" off.
+
+Version bumped to v22.3.6.

@@ -1,3 +1,4 @@
+import importlib.metadata
 import importlib.util
 import json
 import os
@@ -6,6 +7,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import traceback
 import zipfile
 import threading
 import urllib.request
@@ -18,7 +21,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP = "Edgeware++ Configuration"
-VERSION = "22.3.1"
+VERSION = "22.3.6"
 # Points at this fork's repo, not the original Araten/EdgewarePlusPlus repo.
 UPDATE_CHECK_URL = "https://raw.githubusercontent.com/BigWoodArt/Edgeware-Unofficial-v22/main/edgeware/config.pyw"
 UPDATE_RELEASES_URL = "https://github.com/BigWoodArt/Edgeware-Unofficial-v22"
@@ -76,18 +79,31 @@ ALLOWED_BOORU_SITES = sorted({
     "Gelbooru", "Hypnohub", "Konachan", "Konachan_Net", "Paheal", "Realbooru",
     "Rule34", "Safebooru", "Tbib", "Xbooru", "Yandere",
 })
-# Sites actually rebuilt with the real scraper (see booru_scraper.py in src) -
-# matches that module's GELBOORU_FAMILY_DOMAINS keys exactly. Everything else
-# in ALLOWED_BOORU_SITES still uses the older JSON-API-only approach, which
-# may or may not currently work for any given one of them - shown dimmed as
-# a "not guaranteed yet" reminder, not disabled, since they might still work
-# fine and are worth testing. Paheal deliberately isn't in this set despite
-# initially being assumed to be - it turned out to run a different engine
-# entirely (Shimmie2), not the same one as the other sites here.
+# Sites the real scraper (see booru_scraper.py in src) handles directly -
+# matches that module's GELBOORU_FAMILY_DOMAINS keys exactly. Everything
+# else in ALLOWED_BOORU_SITES goes through the third-party "booru" package
+# instead. This is purely which code path handles a site, not a confidence
+# signal - see UNCONFIRMED_BOORU_SITES below for that. Paheal deliberately
+# isn't in this set despite initially being assumed to be - it turned out
+# to run a different engine entirely (Shimmie2), not the same one as the
+# other sites here.
 GELBOORU_FAMILY_SITES = {
     "Atfbooru", "Behoimi", "Gelbooru", "Hypnohub", "Realbooru",
     "Rule34", "Safebooru", "Tbib", "Xbooru",
 }
+# Sites shown dimmed in the site-picker as a "not guaranteed working" cue -
+# not disabled, still fully clickable. This used to just be "whichever
+# sites aren't in GELBOORU_FAMILY_SITES", conflating "uses the simpler
+# third-party package" with "unreliable", which a real Test Download Sites
+# run showed isn't true: Danbooru, Derpibooru, E621, E926, Furbooru,
+# Konachan, Konachan_Net, and Yandere all came back with real results
+# through that package - they never had the Gelbooru-engine-specific
+# problems (auth requirements, dead JSON APIs) that motivated writing
+# booru_scraper.py in the first place, so they never needed rebuilding.
+# Paheal is the one confirmed case that actually fails right now (the
+# "booru" package's own XML parsing errors on it), which is why it's the
+# only one left dimmed.
+UNCONFIRMED_BOORU_SITES = {"Paheal"}
 
 # Parent -> [children] for graying out settings whose parent is off/zero.
 # Two flavors: most parents are plain bools (0/1); the five in
@@ -184,13 +200,13 @@ SECTIONS = {
     ],
     "Hypnotics": [
         ("capPopChance", "Subliminal caption chance", "Chance from 0 to 100 that brief caption messages appear.", "pct", None),
-        ("capPopTimer", "Subliminal message time", "How long a subliminal caption stays visible.", "sec", None),
+        ("capPopTimer", "Subliminal message time", "How long a subliminal caption stays visible, in milliseconds (1000 = 1 second). Default is 300.", "ms", None),
         ("capPopOpacity", "Subliminal caption opacity", "How visible subliminal captions are, from 0 to 100.", "pct", None),
         ("capPopTextColor", "Subliminal text color", "The color of subliminal caption text.", "choice", ["White","Black","Pink"]),
         ("capPopOutlineColor", "Subliminal text outline color", "The color of the outline drawn around subliminal caption text, to help it stay readable over any background.", "choice", ["White","Black"]),
         ("subliminalsChance", "Subliminals chance", "Chance from 0 to 100 that a visual overlay is put over an image.", "pct", None),
         ("subliminalsAlpha", "Image overlay opacity", "How strong the visual overlay is, from 0 to 100.", "pct", None),
-        ("spiralOverlayEnabled", "Full-Screen Spiral + Binaural Audio", "An optional full-screen Spiral overlay plus ambient Binaural audio, one switch for both. Both scale with session intensity (Subliminals chance, message frequency, popup speed), capped at 50% opacity and 15-35% volume so neither overwhelms the screen or ears.", "bool", None),
+        ("spiralOverlayEnabled", "Full-Screen Spiral + Binaural Audio", "An optional full-screen Spiral overlay plus ambient Binaural audio, one switch for both. Both scale with session intensity (Subliminals chance, message frequency, popup speed), capped at 33% opacity and 15-35% volume so neither overwhelms the screen or ears.", "bool", None),
         ("spiralOverlayAsset", "Spiral overlay image", "Which spiral to use for the full-screen overlay above. \"Pack's Own\" uses whatever hypno/spiral asset the pack itself provides (the same one used for the per-image overlay) instead of one of Edgeware's bundled ones.", "choice", ["Classic","Two-Arm Taper","One-Arm Taper","Pack's Own"]),
     ],
     "Wallpaper": [
@@ -204,9 +220,10 @@ SECTIONS = {
         ("booruMinScore", "Minimum score", "Skips results scoring below this. Can be negative. Not every site's scoring is equally reliable - this is best-effort, not a hard guarantee.", "signed_int", None),
         ("booruApiKey", "Gelbooru API key", "Only used for Gelbooru specifically - it now requires this and a user ID below to search at all. Get both from a Gelbooru account's own page. Leave blank if you're not using Gelbooru.", "text", None),
         ("booruUserId", "Gelbooru user ID", "Goes with the API key above - both are required together for Gelbooru specifically.", "text", None),
-        ("booruSites", "Sites to search", "Pick which sites to search - one is chosen at random each time, using the tags above. Dimmed sites aren't rebuilt yet and may not work, but are still clickable if you want to try one.", "booru_sites", None),
+        ("booruSites", "Sites to search", "Pick which sites to search - one is chosen at random each time, using the tags above. Dimmed sites (currently just Paheal) are confirmed not working right now, but are still clickable if you want to try one anyway.", "booru_sites", None),
         ("webVideoTakeover", "Web video takeover", "Opens a recognized site's video fullscreen and locked until it ends, instead of just opening the page. Supports RedGifs, PMVHaven, Hypnotube.", "bool", None),
         ("webVideoMaxLength", "Takeover max length", "Auto-closes a takeover video after this many minutes, regardless of its own length. 0 means no limit.", "int", None),
+        ("showDiscord", "Show on Discord", "Displays a status on Discord while Edgeware runs, if Discord is open. The text and image can be customized per-pack by the pack creator. This could be embarrassing if seen on a main account, so think about who might see it before enabling.", "bool", "danger"),
     ],
     "Modes": [
         ("lkToggle", "Low-key mode", "Keeps activity concentrated in one corner of the screen.", "bool", None),
@@ -260,7 +277,7 @@ SECTIONS = {
     ],
     "Troubleshooting": [
         ("imageResizeFilter", "Image resize quality", "Which filter resizes images to fit a popup. Bilinear (default) is cheaper on CPU than Lanczos and nearly as good when shrinking images. Bicubic sits in between. Doesn't affect animated WebP, which is resized separately.", "choice", ["Bilinear","Bicubic","Lanczos"]),
-        ("videoHardwareAcceleration", "Use video hardware acceleration", "Lets your graphics hardware help decode video. Turn off if videos look wrong or crash - some GPU/driver combinations don't handle it well.", "bool", None),
+        ("videoHardwareAcceleration", "Use video hardware acceleration", "Lets your graphics hardware help decode video. Turn off if videos are black, look wrong, or crash - some GPU/driver combinations don't handle it well.", "bool", None),
         ("mpvSubprocess", "Use a separate video process", "Runs the video player in its own process, so a crash in video playback is less likely to take down all of Edgeware with it.", "bool", None),
     ],
     "Corruption Preview": [],
@@ -289,6 +306,7 @@ DANGER_TEXT = {
     "start_on_logon": "This makes Edgeware start automatically with Windows.",
     "timerMode": "This can temporarily prevent the emergency stop from working normally.",
     "panicDisabled": "This removes an easy way to stop Edgeware.",
+    "showDiscord": "This can show a status on Discord that others might see.",
 }
 DESCRIPTIONS = {
     "Start":"The few things you should decide before running Edgeware.",
@@ -328,7 +346,7 @@ INTENSITY_PRESETS = [
         "delay": 5000, "popupMod": 50, "vidMod": 5, "audioMod": 25, "webMod": 0, "promptMod": 0,
         "timeoutPopups": 1, "popupTimeout": 15, "singleMode": 1,
         "movingChance": 0, "movingSpeed": 0, "denialChance": 0,
-        "capPopChance": 0, "capPopOpacity": 50, "capPopTimer": 3,
+        "capPopChance": 0, "capPopOpacity": 50, "capPopTimer": 300,
         "notificationChance": 5, "notificationImageChance": 20,
         "maxAudio": 1, "audioVolume": 40, "maxVideos": 1, "videoVolume": 40,
         "corruptionMode": 1, "corruptionTrigger": "Timed", "corruptionTime": 120,
@@ -338,7 +356,7 @@ INTENSITY_PRESETS = [
         "delay": 3000, "popupMod": 60, "vidMod": 10, "audioMod": 50, "webMod": 0, "promptMod": 0,
         "timeoutPopups": 1, "popupTimeout": 10, "singleMode": 1,
         "movingChance": 0, "movingSpeed": 0, "denialChance": 0,
-        "capPopChance": 10, "capPopOpacity": 60, "capPopTimer": 3,
+        "capPopChance": 10, "capPopOpacity": 60, "capPopTimer": 300,
         "notificationChance": 10, "notificationImageChance": 40,
         "maxAudio": 1, "audioVolume": 55, "maxVideos": 2, "videoVolume": 55,
         "corruptionMode": 1, "corruptionTrigger": "Timed", "corruptionTime": 90,
@@ -348,7 +366,7 @@ INTENSITY_PRESETS = [
         "delay": 1750, "popupMod": 75, "vidMod": 20, "audioMod": 75, "webMod": 10, "promptMod": 5,
         "timeoutPopups": 0, "popupTimeout": 8, "singleMode": 0,
         "movingChance": 1, "movingSpeed": 1, "denialChance": 0,
-        "capPopChance": 30, "capPopOpacity": 75, "capPopTimer": 2,
+        "capPopChance": 30, "capPopOpacity": 75, "capPopTimer": 250,
         "notificationChance": 15, "notificationImageChance": 60,
         "maxAudio": 2, "audioVolume": 70, "maxVideos": 3, "videoVolume": 70,
         "corruptionMode": 1, "corruptionTrigger": "Timed", "corruptionTime": 60,
@@ -358,7 +376,7 @@ INTENSITY_PRESETS = [
         "delay": 1250, "popupMod": 90, "vidMod": 40, "audioMod": 100, "webMod": 20, "promptMod": 10,
         "timeoutPopups": 0, "popupTimeout": 5, "singleMode": 0,
         "movingChance": 5, "movingSpeed": 2, "denialChance": 0,
-        "capPopChance": 60, "capPopOpacity": 90, "capPopTimer": 2,
+        "capPopChance": 60, "capPopOpacity": 90, "capPopTimer": 200,
         "notificationChance": 20, "notificationImageChance": 80,
         "maxAudio": 3, "audioVolume": 90, "maxVideos": 4, "videoVolume": 90,
         "corruptionMode": 1, "corruptionTrigger": "Timed", "corruptionTime": 30,
@@ -464,8 +482,8 @@ def apply_update(progress):
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def _test_one_booru_site(site, tags, min_score, api_key, user_id, booru_scraper_mod, booru_pkg_mod, asyncio_mod):
-    """One real, minimal (limit=1) request through whichever code path a real
+def _test_one_booru_site(site, tags, min_score, api_key, user_id, booru_scraper_mod, booru_pkg_mod, asyncio_mod, diag=None):
+    """One real, minimal request (plus one request for the image itself) through whichever code path a real
     download would actually use for this site - booru_scraper for the 9
     rebuilt Gelbooru-family sites, the third-party "booru" package for
     everything else. Returns (kind, detail) where kind is "ok" (got a
@@ -477,32 +495,78 @@ def _test_one_booru_site(site, tags, min_score, api_key, user_id, booru_scraper_
     # The "booru" package raises this exact message for zero results,
     # instead of returning an empty list - treat it as empty, not FAIL.
     NO_RESULTS_MESSAGE = "no results, make sure you spelled everything right"
+    diag = {} if diag is None else diag  # Extra detail for the saved log only
+    started = time.perf_counter()
     try:
         if site in GELBOORU_FAMILY_SITES:
-            url = next(booru_scraper_mod.search_gelbooru_family(site, tags, min_score, limit=1, api_key=api_key, user_id=user_id), None)
-            return ("ok", url) if url else ("empty", "no results for these tags/score")
+            diag["engine"] = "booru_scraper (Gelbooru-family: JSON API, HTML fallback)"
+            url = booru_scraper_mod.first_image_url(booru_scraper_mod.search_gelbooru_family(site, tags, min_score, limit=20, api_key=api_key, user_id=user_id))
         else:
+            diag["engine"] = "third-party booru package"
             site_obj = getattr(booru_pkg_mod, site)()
-            raw = asyncio_mod.run(site_obj.search(query=tags, limit=1))
+            raw = asyncio_mod.run(site_obj.search(query=tags, limit=10))
             results = booru_pkg_mod.resolve(raw)
-            return ("ok", f"{len(results)} result(s) via the booru package") if results else ("empty", "no results for these tags/score")
+            diag["posts_returned"] = len(results) if results else 0
+            if not results:
+                return ("empty", "no results for these tags/score")
+            url = booru_scraper_mod.first_image_url(u for u in map(booru_scraper_mod.extract_file_url, results) if u)
+        if not url:
+            return ("empty", "no still-image results for these tags/score (videos and other files are skipped)")
+        # Request the link the way a real download does - a URL that merely
+        # exists in the API response isn't proof it serves an image.
+        served, problem = booru_scraper_mod.verify_image_url(url, diag)
+        return ("ok", url) if served else ("fail", f"{url}  ->  {problem}")
     except Exception as e:
         if NO_RESULTS_MESSAGE in str(e):
             return ("empty", "no results for these tags/score (booru package raises rather than returning empty)")
+        diag["traceback"] = traceback.format_exc()
         return ("fail", f"{type(e).__name__}: {e}")
+    finally:
+        diag["elapsed"] = time.perf_counter() - started
 
 
-def _save_booru_test_log(results, tags, min_score):
+def _package_version(name):
+    try:
+        return importlib.metadata.version(name)
+    except Exception:
+        return "not installed"
+
+
+def _save_booru_test_log(results, tags, min_score, diags=None, settings_info=None):
+    diags = diags or {}
+    settings_info = settings_info or {}
     log_dir = DATA / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     path = log_dir / f"booru_site_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    counts = {kind: sum(1 for _, k, _ in results if k == kind) for kind in ("ok", "empty", "fail")}
     lines = [
         f"Edgeware++ booru site test - {datetime.now().isoformat(timespec='seconds')}",
         f'tags="{tags}"  min_score={min_score}',
+        f"Edgeware++ {VERSION}  |  Python {sys.version.split()[0]}  |  {sys.platform}",
+        f"booru {_package_version('booru')}  |  requests {_package_version('requests')}  |  Pillow {_package_version('pillow')}",
+        f"Settings: sites selected={settings_info.get('sites') or '(none)'}  api key={'set' if settings_info.get('api_key') else 'not set'}  user id={'set' if settings_info.get('user_id') else 'not set'}",
+        "Notes: each site gets one search of a random page (1-10) with per-request timeout 5s; the image link is then requested with a Referer set to its own site.",
+        f"Summary: {counts['ok']} ok, {counts['empty']} empty, {counts['fail']} fail of {len(results)} sites",
         "",
     ]
     for site, kind, detail in results:
         lines.append(f"[{kind.upper():5}] {site:14} {detail}")
+        d = diags.get(site, {})
+        extras = []
+        if "engine" in d:
+            extras.append(f"engine: {d['engine']}")
+        if "posts_returned" in d:
+            extras.append(f"posts returned: {d['posts_returned']}")
+        if "status" in d:
+            extras.append(f"image request: HTTP {d['status']}, {d.get('content_type') or 'no content type'}, {d.get('redirects', 0)} redirect(s)")
+            if d.get("final_url") and d["final_url"] != detail.split("  ->  ")[0]:
+                extras.append(f"image request ended at: {d['final_url']}")
+        if "elapsed" in d:
+            extras.append(f"time: {d['elapsed']:.1f}s")
+        for extra in extras:
+            lines.append(f"{'':8}{extra}")
+        if d.get("traceback"):
+            lines.extend(f"{'':8}{tb_line}" for tb_line in d["traceback"].rstrip().splitlines())
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
 
@@ -1639,11 +1703,10 @@ class App:
         cols=6  # Spans the full card width (see add_setting)
         for i,site in enumerate(ALLOWED_BOORU_SITES):
             var=tk.BooleanVar(value=site in current)
-            # Sites not yet rebuilt with the real scraper get dimmed text as a
-            # "not guaranteed working yet" reminder - still fully clickable
-            # (not disabled), since they might work fine and are worth
-            # testing; only the text color differs, nothing else.
-            text_color=self.palette["white"] if site in GELBOORU_FAMILY_SITES else self.palette["dim"]
+            # Sites confirmed not to work right now get dimmed text as a
+            # reminder - still fully clickable (not disabled), since a site
+            # can come back later and this isn't re-checked automatically.
+            text_color=self.palette["dim"] if site in UNCONFIRMED_BOORU_SITES else self.palette["white"]
             lbl=tk.Label(grid,text=site,width=12,bg=self.palette["accent_dark"] if var.get() else self.palette["panel3"],fg=text_color,font=("Segoe UI",8,"bold"),cursor="hand2")
             lbl.grid(row=i//cols,column=i%cols,padx=2,pady=2,sticky="w")
             lbl.bind("<Button-1>",make_flip(site,lbl,var))
@@ -2042,7 +2105,7 @@ class App:
 
         booru_card=tk.Frame(self.page,bg=self.palette["panel3"],highlightthickness=1,highlightbackground=self.palette["border"]); booru_card.pack(fill="x",padx=14,pady=7)
         tk.Label(booru_card,text="Test Download Sites",bg=self.palette["panel3"],fg=self.palette["white"],font=("Segoe UI",10,"bold")).pack(anchor="w",padx=10,pady=(7,1))
-        tk.Label(booru_card,text=f"Makes one real, minimal request to all {len(ALLOWED_BOORU_SITES)} known sites (not just the ones currently checked), using your saved tags/min score/API key - both the rebuilt sites and the dimmed \"not guaranteed yet\" ones. Shows which work, which return nothing for your tags, and which fail outright with the actual error - useful for spotting when a site starts needing something new (like Gelbooru's auth requirement).",bg=self.palette["panel3"],fg=self.palette["muted"],font=("Segoe UI",9),wraplength=650,justify="left").pack(anchor="w",padx=10,pady=(0,5))
+        tk.Label(booru_card,text=f"Makes one real, minimal request to all {len(ALLOWED_BOORU_SITES)} known sites (not just the ones currently checked), using your saved tags/min score/API key - dimmed sites included. Shows which work, which return nothing for your tags, and which fail outright with the actual error - useful for spotting when a site starts needing something new (like Gelbooru's auth requirement), or when a currently-dimmed site starts working again.",bg=self.palette["panel3"],fg=self.palette["muted"],font=("Segoe UI",9),wraplength=650,justify="left").pack(anchor="w",padx=10,pady=(0,5))
         self.make_button(booru_card,"Test all download sites",self.test_booru_sites_dialog,primary=True).pack(anchor="w",padx=10,pady=(0,8))
 
 
@@ -2110,13 +2173,17 @@ class App:
         cancel_btn=self.make_button(btn_row,"Cancel",cancel.set); cancel_btn.pack(side="left",padx=4)
         save_btn=self.make_button(btn_row,"Save Full Log",lambda:None,primary=True); save_btn.config(state="disabled"); save_btn.pack(side="left",padx=4)
 
+        diags={}
+        settings_info={"sites":str(self.cfg.get("booruSites","") or ""),"api_key":api_key,"user_id":user_id}
+
         def worker():
             results=[]
             for i,site in enumerate(sites,1):
                 if cancel.is_set():
                     q.put({"stage":"cancelled"}); return
                 q.put({"stage":"progress","site":site,"index":i,"total":len(sites)})
-                kind,detail=_test_one_booru_site(site,tags,min_score,api_key,user_id,_booru_scraper,_booru_pkg,_asyncio)
+                diags[site]={}
+                kind,detail=_test_one_booru_site(site,tags,min_score,api_key,user_id,_booru_scraper,_booru_pkg,_asyncio,diags[site])
                 results.append((site,kind,detail))
                 q.put({"stage":"result","site":site,"kind":kind,"detail":detail})
             q.put({"stage":"done","results":results})
@@ -2124,7 +2191,7 @@ class App:
 
         def finish_save(results):
             try:
-                path=_save_booru_test_log(results,tags,min_score)
+                path=_save_booru_test_log(results,tags,min_score,diags,settings_info)
                 messagebox.showinfo(APP,f"Saved to:\n{path}")
             except Exception as e:
                 messagebox.showerror(APP,str(e))

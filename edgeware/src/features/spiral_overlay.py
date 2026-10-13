@@ -19,7 +19,7 @@
 monitor, whose opacity scales linearly with the pack's own hypno/spiral
 overlay chance (settings.hypno_chance - the same value that drives the
 per-image hypno overlay in image_popup.py): 0% chance -> 0% opacity, 100%
-chance -> 50% opacity, capped there deliberately so it can never fully
+chance -> 33% opacity, capped there deliberately so it can never fully
 obscure whatever else is on screen.
 
 This is a persistent ambient layer, not a one-shot popup like everything in
@@ -59,12 +59,12 @@ SPIRAL_ASSETS = {
 
 RELIFT_INTERVAL_MS = 250
 # Deliberately not user-configurable independent of hypno_chance - see the
-# module docstring. 50% is the ceiling regardless of how high hypno_chance
+# module docstring. 33% is the ceiling regardless of how high hypno_chance
 # goes, so this can never fully hide what's underneath it.
-MAX_OPACITY = 0.5
+MAX_OPACITY = 0.33
 # Max opacity change per re-lift tick. At the 250ms tick rate above, this is
-# a 4%-of-full-range change per second - a full 0%-to-50% swing takes about
-# 12.5 seconds. Fast enough to feel responsive to a corruption level change,
+# a 4%-of-full-range change per second - a full 0%-to-33% swing takes about
+# 8.25 seconds. Fast enough to feel responsive to a corruption level change,
 # slow enough to read as a fade rather than a jump cut.
 OPACITY_STEP_PER_TICK = 0.01
 
