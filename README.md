@@ -123,6 +123,8 @@ Entries are kept to 20 words or less.
 * A pack's own settings under Pack Priority were silently wiped out at corruption's first level - fixed.
 * New optional full-screen spiral overlay with paired binaural audio, reacting to session intensity with hard opacity/volume caps.
 
+**v22.3.7** - Visible warnings with fix steps for old Python, missing packages/libmpv, startup crashes and popups that fail to load.
+
 **v22.3.6** - Candidate fix for the empty window flashing before videos.
 
 **v22.3.5** - Booru searches pick random pages for variety. RealBooru image downloads send a Referer, videos are skipped, and Derpibooru/Furbooru URLs now work. The site test checks that links serve images and logs more detail.

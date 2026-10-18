@@ -2753,3 +2753,20 @@ environment; if a flash remains, report whether it still happens with
 "Run mpv in a subprocess" off.
 
 Version bumped to v22.3.6.
+
+## 76. v22.3.7 - Visible startup and failure warnings
+
+New `src/startup_check.py` (standard library only). `main_edgeware.py`
+now shows a dialog with fix steps instead of failing silently:
+
+- Before any import: Python older than 3.12, missing packages, or a missing
+  `libmpv-2.dll` (Windows). Points to EdgewareSetup.bat, then exits.
+- Any uncaught exception during startup: shows the error and the logs
+  folder, then exits.
+- Watchdog (one warning per session): 5 or more logged errors in the first
+  2 minutes, or no popup roll after 90 seconds (skipped in hibernate and
+  Do Not Press modes).
+
+Limit: a popup that fails without logging an error is not detected.
+
+Version bumped to v22.3.7.

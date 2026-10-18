@@ -20,6 +20,9 @@ if __name__ == "__main__":
     from threading import Thread
 
     from paths import Data
+    from startup_check import preflight
+
+    preflight(Data.ROOT)  # Visible message + exit if Python, packages or libmpv are unusable
 
     # Fix scaling on high resolution displays
     try:
@@ -51,6 +54,7 @@ if __name__ == "__main__":
 import json
 import logging
 import random
+import sys
 from pathlib import Path
 from threading import Thread
 from tkinter import Tk
@@ -91,6 +95,7 @@ from panic import ensure_panic_wallpaper, start_panic_listener
 from paths import Data
 from roll import RollTarget, roll_targets
 from scripting import run_script
+from startup_check import report_fatal, start_watchdog
 from state import State
 from voluptuous.error import Invalid
 
@@ -184,141 +189,151 @@ def pick_random_pack_path() -> Path | None:
     return random.choice(packs) if packs else None
 
 
+popup_attempts = [0]  # Rounds of popup rolling so far; read by the startup watchdog
+
+
 def main(root: Tk, settings: Settings, pack: Pack, targets: list[RollTarget]) -> None:
+    popup_attempts[0] += 1
     roll_targets(settings, targets)
     Thread(target=lambda: fill_drive(root, settings, pack, state), daemon=True).start()  # Thread for performance reasons
     root.after(settings.delay, lambda: main(root, settings, pack, targets))
 
 
 if __name__ == "__main__":
-    utils.init_logging("main")
+    try:
+        utils.init_logging("main")
 
-    first_launch_configure()
+        first_launch_configure()
 
-    root = Tk()
-    root.withdraw()
+        root = Tk()
+        root.withdraw()
 
-    def log_callback_exception(exc_type: type[BaseException], exc_value: BaseException | None, exc_traceback: TracebackType | None) -> None:
-        # Tkinter's default behavior for an exception raised inside any
-        # .after()/bind()-driven callback is to print it to stderr and keep
-        # the mainloop running - invisible in .pyw (windowed, no console)
-        # mode, and never reaches this app's own log file since it bypasses
-        # `logging` entirely. That silence looks identical to "nothing is
-        # wrong" from the outside: the window stays alive and responsive,
-        # every popup type just quietly stops happening. Routing it through
-        # logging.exception() puts it in the same log file everything else
-        # already goes to, console or not, without changing the actual
-        # (deliberately non-fatal) Tkinter behavior of continuing to run.
-        logging.exception("Unhandled exception in a Tk callback", exc_info=(exc_type, exc_value, exc_traceback))
+        def log_callback_exception(exc_type: type[BaseException], exc_value: BaseException | None, exc_traceback: TracebackType | None) -> None:
+            # Tkinter's default behavior for an exception raised inside any
+            # .after()/bind()-driven callback is to print it to stderr and keep
+            # the mainloop running - invisible in .pyw (windowed, no console)
+            # mode, and never reaches this app's own log file since it bypasses
+            # `logging` entirely. That silence looks identical to "nothing is
+            # wrong" from the outside: the window stays alive and responsive,
+            # every popup type just quietly stops happening. Routing it through
+            # logging.exception() puts it in the same log file everything else
+            # already goes to, console or not, without changing the actual
+            # (deliberately non-fatal) Tkinter behavior of continuing to run.
+            logging.exception("Unhandled exception in a Tk callback", exc_info=(exc_type, exc_value, exc_traceback))
 
-    root.report_callback_exception = log_callback_exception
+        root.report_callback_exception = log_callback_exception
 
-    settings = Settings()
-    ensure_panic_wallpaper()  # Before pack/wallpaper handling, so Panic never falls back to a generic image
+        settings = Settings()
+        ensure_panic_wallpaper()  # Before pack/wallpaper handling, so Panic never falls back to a generic image
 
-    do_not_press = read_do_not_press_armed()
-    if do_not_press:
-        random_pack = pick_random_pack_path()
-        if random_pack is not None:
-            settings.pack_path = random_pack
-        # Force panic lockout on for this session regardless of the saved
-        # setting, in case config.pyw's own write of it didn't take for some
-        # reason - the whole point of this feature is that this is never
-        # skipped by accident.
-        settings.panic_lockout = True
+        do_not_press = read_do_not_press_armed()
+        if do_not_press:
+            random_pack = pick_random_pack_path()
+            if random_pack is not None:
+                settings.pack_path = random_pack
+            # Force panic lockout on for this session regardless of the saved
+            # setting, in case config.pyw's own write of it didn't take for some
+            # reason - the whole point of this feature is that this is never
+            # skipped by accident.
+            settings.panic_lockout = True
 
-    pack = Pack(settings.pack_path)
-    state = State()
+        pack = Pack(settings.pack_path)
+        state = State()
 
-    apply_pack_priority(settings, pack)  # Before anything reads settings.corruption_mode etc. below
-    settings.corruption_mode = settings.corruption_mode and pack.corruption_levels
-    # No confirmation dialog here (removed) - it blocked startup on a modal
-    # you-sure-about-this prompt, which is actively broken for an unattended
-    # session (e.g. Do Not Press): nobody there to click it. config.pyw
-    # already shows what a pack changes, non-blockingly, before you ever run it.
+        apply_pack_priority(settings, pack)  # Before anything reads settings.corruption_mode etc. below
+        settings.corruption_mode = settings.corruption_mode and pack.corruption_levels
+        # No confirmation dialog here (removed) - it blocked startup on a modal
+        # you-sure-about-this prompt, which is actively broken for an unattended
+        # session (e.g. Do Not Press): nobody there to click it. config.pyw
+        # already shows what a pack changes, non-blockingly, before you ever run it.
 
-    # TODO: Use a dict?
-    targets = [
-        RollTarget(lambda: ImagePopup(root, settings, pack, state), lambda: settings.image_chance if not settings.mitosis_mode else 0),
-        RollTarget(lambda: VideoPopup(root, settings, pack, state), lambda: settings.video_chance if not settings.mitosis_mode else 0),
-        RollTarget(lambda: SubliminalPopup(settings, pack), lambda: settings.subliminal_chance),
-        RollTarget(lambda: Prompt(settings, pack, state), lambda: settings.prompt_chance),
-        RollTarget(lambda: play_audio(root, settings, pack, state), lambda: settings.audio_chance),
-        RollTarget(lambda: open_web(root, settings, state, pack), lambda: settings.web_chance),
-        RollTarget(lambda: send_notification(settings, pack), lambda: settings.notification_chance),
-    ]
+        # TODO: Use a dict?
+        targets = [
+            RollTarget(lambda: ImagePopup(root, settings, pack, state), lambda: settings.image_chance if not settings.mitosis_mode else 0),
+            RollTarget(lambda: VideoPopup(root, settings, pack, state), lambda: settings.video_chance if not settings.mitosis_mode else 0),
+            RollTarget(lambda: SubliminalPopup(settings, pack), lambda: settings.subliminal_chance),
+            RollTarget(lambda: Prompt(settings, pack, state), lambda: settings.prompt_chance),
+            RollTarget(lambda: play_audio(root, settings, pack, state), lambda: settings.audio_chance),
+            RollTarget(lambda: open_web(root, settings, state, pack), lambda: settings.web_chance),
+            RollTarget(lambda: send_notification(settings, pack), lambda: settings.notification_chance),
+        ]
 
-    # For some reason, when two windows are spawned very quickly, some WMs will place the most
-    # recent one /below/ the other rather than on top. This can cause subliminals to be occluded.
-    if is_linux() and get_desktop_environment() in ("i3", "dwm", "bspwm", "xmonad", "openbox"):
-        targets = targets[::-1]
+        # For some reason, when two windows are spawned very quickly, some WMs will place the most
+        # recent one /below/ the other rather than on top. This can cause subliminals to be occluded.
+        if is_linux() and get_desktop_environment() in ("i3", "dwm", "bspwm", "xmonad", "openbox"):
+            targets = targets[::-1]
 
-    def safe_step(description: str, fn: Callable[[], None]) -> None:
-        # Each of these is an independent feature - a failure in one (e.g.
-        # make_desktop_icons() unable to save a .lnk file, as seen in a real
-        # report) must never prevent the others from running, and especially
-        # must never prevent panic setup or the actual popup loop below from
-        # being reached. Previously a single exception here silently killed
-        # every remaining step in start_main() for the rest of the session -
-        # invisible even after the report_callback_exception fix above,
-        # since by the time that fires the damage (skipped steps) is already
-        # done. Logs and moves on instead.
-        try:
-            fn()
-        except Exception:
-            logging.exception(f"Non-fatal error during startup: {description} - continuing with the rest of startup")
+        def safe_step(description: str, fn: Callable[[], None]) -> None:
+            # Each of these is an independent feature - a failure in one (e.g.
+            # make_desktop_icons() unable to save a .lnk file, as seen in a real
+            # report) must never prevent the others from running, and especially
+            # must never prevent panic setup or the actual popup loop below from
+            # being reached. Previously a single exception here silently killed
+            # every remaining step in start_main() for the rest of the session -
+            # invisible even after the report_callback_exception fix above,
+            # since by the time that fires the damage (skipped steps) is already
+            # done. Logs and moves on instead.
+            try:
+                fn()
+            except Exception:
+                logging.exception(f"Non-fatal error during startup: {description} - continuing with the rest of startup")
 
-    def start_main() -> None:
-        safe_step("tray icon", lambda: make_tray_icon(root, settings, pack, state, lambda: main_hibernate(root, settings, pack, state, targets)))
-        safe_step("desktop icons", lambda: make_desktop_icons(settings))
-        if not do_not_press:
-            # Already started immediately below instead, so panic (and its
-            # lockout) is live for the whole silent wait, not just from here.
+        def start_main() -> None:
+            safe_step("tray icon", lambda: make_tray_icon(root, settings, pack, state, lambda: main_hibernate(root, settings, pack, state, targets)))
+            safe_step("desktop icons", lambda: make_desktop_icons(settings))
+            if not do_not_press:
+                # Already started immediately below instead, so panic (and its
+                # lockout) is live for the whole silent wait, not just from here.
+                safe_step("keyboard/panic-key handling", lambda: handle_keyboard(root, settings, state))
+                safe_step("panic listener", lambda: start_panic_listener(root, settings, state))
+            Thread(target=lambda: replace_images(settings, pack), daemon=True).start()  # Thread for performance reasons
+            safe_step("corruption mode", lambda: handle_corruption(root, settings, pack, state))
+            safe_step("Discord rich presence", lambda: handle_discord(settings, pack))
+            if not do_not_press:
+                safe_step("panic lockout", lambda: handle_panic_lockout(root, settings, state))
+            safe_step("mitosis mode", lambda: handle_mitosis_mode(root, settings, pack, state))
+            safe_step("pack startup script", lambda: run_script(root, settings, pack, state))
+            if settings.web_video_takeover:
+                # Unconditional regardless of hibernate mode - this just listens
+                # for the browser extension's detected videos (Hypnotube), it
+                # doesn't do anything on its own until one arrives.
+                safe_step("web video takeover server", lambda: start_takeover_server(root, settings, state))
+
+            if settings.hibernate_mode:
+                start_main_hibernate(root, settings, pack, state, targets)
+            else:
+                # In sync with the first hibernate wake-up when hibernating (see
+                # start_main_hibernate) - started here, unconditionally, only for
+                # the non-hibernating case. Reported directly: these used to
+                # start immediately regardless of hibernate mode, running under
+                # total silence before the first wake-up.
+                safe_step("spiral overlay", lambda: state.__setattr__("spiral_overlays", handle_spiral_overlay(root, settings, pack)))
+                safe_step("binaural overlay", lambda: state.__setattr__("binaural_overlay", handle_binaural_overlay(root, settings, pack)))
+                safe_step("wallpaper handling", lambda: handle_wallpaper(root, settings, pack, state))
+                main(root, settings, pack, targets)
+
+        if do_not_press:
+            # Panic (and its lockout) start right away, before the wait below,
+            # not inside start_main() - the point of this feature is that panic
+            # is reachable (gated by the safeword/lockout timer, same as normal)
+            # for the entire wait, not only once something visible happens.
             safe_step("keyboard/panic-key handling", lambda: handle_keyboard(root, settings, state))
             safe_step("panic listener", lambda: start_panic_listener(root, settings, state))
-        Thread(target=lambda: replace_images(settings, pack), daemon=True).start()  # Thread for performance reasons
-        safe_step("corruption mode", lambda: handle_corruption(root, settings, pack, state))
-        safe_step("Discord rich presence", lambda: handle_discord(settings, pack))
-        if not do_not_press:
             safe_step("panic lockout", lambda: handle_panic_lockout(root, settings, state))
-        safe_step("mitosis mode", lambda: handle_mitosis_mode(root, settings, pack, state))
-        safe_step("pack startup script", lambda: run_script(root, settings, pack, state))
-        if settings.web_video_takeover:
-            # Unconditional regardless of hibernate mode - this just listens
-            # for the browser extension's detected videos (Hypnotube), it
-            # doesn't do anything on its own until one arrives.
-            safe_step("web video takeover server", lambda: start_takeover_server(root, settings, state))
-
-        if settings.hibernate_mode:
-            start_main_hibernate(root, settings, pack, state, targets)
+            delay_ms = int(random.uniform(5, 90) * 60 * 1000)
+            logging.info(f"Do Not Press is armed: waiting {delay_ms / 60000:.1f} minutes before starting")
+            if settings.startup_splash:
+                root.after(delay_ms, lambda: StartupSplash(settings, pack, start_main))
+            else:
+                root.after(delay_ms, start_main)
+        elif settings.startup_splash:
+            StartupSplash(settings, pack, start_main)
         else:
-            # In sync with the first hibernate wake-up when hibernating (see
-            # start_main_hibernate) - started here, unconditionally, only for
-            # the non-hibernating case. Reported directly: these used to
-            # start immediately regardless of hibernate mode, running under
-            # total silence before the first wake-up.
-            safe_step("spiral overlay", lambda: state.__setattr__("spiral_overlays", handle_spiral_overlay(root, settings, pack)))
-            safe_step("binaural overlay", lambda: state.__setattr__("binaural_overlay", handle_binaural_overlay(root, settings, pack)))
-            safe_step("wallpaper handling", lambda: handle_wallpaper(root, settings, pack, state))
-            main(root, settings, pack, targets)
+            start_main()
 
-    if do_not_press:
-        # Panic (and its lockout) start right away, before the wait below,
-        # not inside start_main() - the point of this feature is that panic
-        # is reachable (gated by the safeword/lockout timer, same as normal)
-        # for the entire wait, not only once something visible happens.
-        safe_step("keyboard/panic-key handling", lambda: handle_keyboard(root, settings, state))
-        safe_step("panic listener", lambda: start_panic_listener(root, settings, state))
-        safe_step("panic lockout", lambda: handle_panic_lockout(root, settings, state))
-        delay_ms = int(random.uniform(5, 90) * 60 * 1000)
-        logging.info(f"Do Not Press is armed: waiting {delay_ms / 60000:.1f} minutes before starting")
-        if settings.startup_splash:
-            root.after(delay_ms, lambda: StartupSplash(settings, pack, start_main))
-        else:
-            root.after(delay_ms, start_main)
-    elif settings.startup_splash:
-        StartupSplash(settings, pack, start_main)
-    else:
-        start_main()
-
-    root.mainloop()
+        start_watchdog(root, Data.LOGS, not settings.hibernate_mode and not do_not_press, popup_attempts)
+        root.mainloop()
+    except Exception as e:
+        logging.exception("Fatal error during startup")
+        report_fatal(e, Data.LOGS)
+        sys.exit(1)
