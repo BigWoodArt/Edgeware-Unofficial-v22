@@ -44,6 +44,7 @@ import importlib.util
 import logging
 import sys
 import traceback
+from pathlib import Path
 from tkinter import Tk, messagebox
 
 # Same set of third-party packages config.pyw checks for at startup - checked
@@ -74,6 +75,9 @@ if sys.platform == "win32":
 if __name__ == "__main__":
     missing = [f"{name} ({REQUIRED_PACKAGES[name]})" for name in REQUIRED_PACKAGES if importlib.util.find_spec(name) is None]
     if missing:
+        from startup_check import relaunch_with_python312
+
+        relaunch_with_python312(Path(__file__).resolve())
         fix = "Run EdgewareSetup.bat in this folder to install everything automatically." if sys.platform == "win32" else "Run: pip install -r requirements.txt"
         _root = Tk()
         _root.withdraw()

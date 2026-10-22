@@ -123,6 +123,8 @@ Entries are kept to 20 words or less.
 * A pack's own settings under Pack Priority were silently wiped out at corruption's first level - fixed.
 * New optional full-screen spiral overlay with paired binaural audio, reacting to session intensity with hard opacity/volume caps.
 
+**v22.3.8** - EdgewareSetup.bat retries with Python 3.12 when package install fails on a newer Python (winrt build errors).
+
 **v22.3.7** - Visible warnings with fix steps for old Python, missing packages/libmpv, startup crashes and popups that fail to load.
 
 **v22.3.6** - Candidate fix for the empty window flashing before videos.

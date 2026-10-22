@@ -17,12 +17,13 @@
 
 if __name__ == "__main__":
     import os
+    from pathlib import Path as _Path
     from threading import Thread
 
     from paths import Data
     from startup_check import preflight
 
-    preflight(Data.ROOT)  # Visible message + exit if Python, packages or libmpv are unusable
+    preflight(Data.ROOT, _Path(__file__).resolve())  # Visible message + exit if Python, packages or libmpv are unusable
 
     # Fix scaling on high resolution displays
     try:

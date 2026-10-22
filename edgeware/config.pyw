@@ -21,7 +21,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP = "Edgeware++ Configuration"
-VERSION = "22.3.7"
+VERSION = "22.3.8"
 # Points at this fork's repo, not the original Araten/EdgewarePlusPlus repo.
 UPDATE_CHECK_URL = "https://raw.githubusercontent.com/BigWoodArt/Edgeware-Unofficial-v22/main/edgeware/config.pyw"
 UPDATE_RELEASES_URL = "https://github.com/BigWoodArt/Edgeware-Unofficial-v22"
@@ -2303,6 +2303,10 @@ def check_setup_requirements():
     missing_mpv_dll = sys.platform == "win32" and not (DATA / "libmpv-2.dll").is_file()
     if not missing and not missing_mpv_dll:
         return
+    if missing:
+        sys.path.insert(0, str(HERE / "src"))
+        from startup_check import relaunch_with_python312
+        relaunch_with_python312(Path(__file__).resolve())
 
     lines = []
     if missing:

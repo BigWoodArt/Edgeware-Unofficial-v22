@@ -2770,3 +2770,22 @@ now shows a dialog with fix steps instead of failing silently:
 Limit: a popup that fails without logging an error is not detected.
 
 Version bumped to v22.3.7.
+
+## 77. v22.3.8 - Setup falls back to Python 3.12
+
+On very new Python versions, `desktop-notifier`'s `winrt-*` dependencies
+fail to build, so pip install failed and setup stopped. Now:
+
+- `EdgewareSetup.bat`: if the default install fails, it finds or installs
+  Python 3.12 (per-user, via the `py` launcher) and installs there, then
+  opens the config with `pyw -3.12`. If the default install works, nothing
+  changes.
+- `config.pyw`, `main_config.py`, `main_edgeware.py`: if packages are missing
+  on the default Python but Python 3.12 has them all, they restart under
+  3.12 (once, Windows only). Needed because double-clicking a `.pyw` uses the
+  default Python.
+- The "install failed" dialog now mentions Python 3.12.
+
+Not tested on Windows (batch script was reviewed, not run).
+
+Version bumped to v22.3.8.

@@ -65,13 +65,37 @@ if not %errorlevel%==0 (
 )
 
 echo Installing requirements...
+set USE312=0
 py -m pip install -r requirements.txt
-if not %errorlevel%==0 (
-  echo Failed to install requirements.
-  powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('Installing Edgeware++''s required Python packages failed. Check the command window for the actual pip error above, then try running this installer again.', 'Edgeware++ Setup - Install Failed', 'OK', 'Error')"
-  pause
-  exit
-)
+if %errorlevel%==0 goto requirementsDone
+
+:: Some packages (the winrt-* ones from desktop-notifier) have no prebuilt files
+:: for very new Python versions and fail to build. Retry with Python 3.12.
+echo:
+echo Install failed on your default Python. Trying Python 3.12 instead...
+py -3.12 --version
+if %errorlevel%==0 goto have312
+echo Python 3.12 not found. Downloading it, please wait...
+if %OS%==32BIT powershell -Command "Invoke-WebRequest https://www.python.org/ftp/python/3.12.6/python-3.12.6.exe -OutFile py312.exe"
+if %OS%==64BIT powershell -Command "Invoke-WebRequest https://www.python.org/ftp/python/3.12.6/python-3.12.6-amd64.exe -OutFile py312.exe"
+if exist py312.exe start /wait "" "%CD%\py312.exe" /passive InstallAllUsers=0 PrependPath=0 Include_launcher=1
+py -3.12 --version
+if not %errorlevel%==0 goto requirementsFailed
+
+:have312
+py -3.12 -m pip install -r requirements.txt
+if not %errorlevel%==0 goto requirementsFailed
+set USE312=1
+goto requirementsDone
+
+:requirementsFailed
+echo Failed to install requirements.
+powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('Installing Edgeware++''s required Python packages failed. Check the command window for the actual pip error above. If you use a very new Python (3.13 or newer), install Python 3.12 from python.org and run this installer again.', 'Edgeware++ Setup - Install Failed', 'OK', 'Error')"
+pause
+exit
+
+:requirementsDone
+if exist py312.exe del py312.exe
 
 if not exist data\libmpv-2.dll (
   echo Installing libmpv...
@@ -114,5 +138,9 @@ echo config.pyw: runs the config window which allows changing Edgeware++ setting
 echo edgeware.pyw: starts Edgeware++ with the config settings you have saved
 echo panic.pyw: kills Edgeware++ and all currently spawned popups
 pause
-start "Edgeware++ Config" "%CD%/config.pyw"
+if %USE312%==1 (
+  start "Edgeware++ Config" pyw -3.12 "%CD%/config.pyw"
+) else (
+  start "Edgeware++ Config" "%CD%/config.pyw"
+)
 exit
