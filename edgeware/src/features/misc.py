@@ -145,6 +145,12 @@ def handle_discord(settings: Settings, pack: Pack) -> None:
         logging.warning(f"Setting Discord presence failed. Reason: {e}")
 
 
+def hold_panic_lockout(settings: Settings, state: State) -> None:
+    """Locks Panic with no expiry; handle_panic_lockout() later starts the countdown."""
+    if settings.panic_lockout:
+        state.panic_lockout_active = True
+
+
 def handle_panic_lockout(root: Tk, settings: Settings, state: State) -> None:
     def panic_lockout_over() -> None:
         state.panic_lockout_active = False

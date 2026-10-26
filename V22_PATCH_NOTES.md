@@ -2789,3 +2789,19 @@ fail to build, so pip install failed and setup stopped. Now:
 Not tested on Windows (batch script was reviewed, not run).
 
 Version bumped to v22.3.8.
+
+## 78. v22.3.9 - Do Not Press lockout expired too early
+
+With Do Not Press armed, the Panic Lockout countdown started when Edgeware
+launched, in parallel with the random 5-90 minute wait. A lockout time
+shorter than the wait (the default is 60 minutes) ran out before popups
+began, so Panic worked without the safeword. Now:
+
+- During the wait, the lockout is held on with no expiry
+  (`hold_panic_lockout` in `features/misc.py`).
+- When popups start, `handle_panic_lockout` begins the normal countdown.
+
+Normal (non Do Not Press) runs are unchanged. Every Panic route (hotkey,
+tray, popup key, panic.pyw) already goes through the lockout check.
+
+Version bumped to v22.3.9.

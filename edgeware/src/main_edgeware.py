@@ -78,6 +78,7 @@ from features.misc import (
     handle_mitosis_mode,
     handle_panic_lockout,
     handle_wallpaper,
+    hold_panic_lockout,
     make_desktop_icons,
     make_tray_icon,
     open_web,
@@ -290,8 +291,8 @@ if __name__ == "__main__":
             Thread(target=lambda: replace_images(settings, pack), daemon=True).start()  # Thread for performance reasons
             safe_step("corruption mode", lambda: handle_corruption(root, settings, pack, state))
             safe_step("Discord rich presence", lambda: handle_discord(settings, pack))
-            if not do_not_press:
-                safe_step("panic lockout", lambda: handle_panic_lockout(root, settings, state))
+            # With Do Not Press the lockout was held through the wait; its countdown starts now.
+            safe_step("panic lockout", lambda: handle_panic_lockout(root, settings, state))
             safe_step("mitosis mode", lambda: handle_mitosis_mode(root, settings, pack, state))
             safe_step("pack startup script", lambda: run_script(root, settings, pack, state))
             if settings.web_video_takeover:
@@ -320,7 +321,7 @@ if __name__ == "__main__":
             # for the entire wait, not only once something visible happens.
             safe_step("keyboard/panic-key handling", lambda: handle_keyboard(root, settings, state))
             safe_step("panic listener", lambda: start_panic_listener(root, settings, state))
-            safe_step("panic lockout", lambda: handle_panic_lockout(root, settings, state))
+            safe_step("panic lockout", lambda: hold_panic_lockout(settings, state))
             delay_ms = int(random.uniform(5, 90) * 60 * 1000)
             logging.info(f"Do Not Press is armed: waiting {delay_ms / 60000:.1f} minutes before starting")
             if settings.startup_splash:
