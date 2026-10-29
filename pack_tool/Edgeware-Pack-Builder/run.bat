@@ -1,18 +1,12 @@
 @echo off
 cd /d "%~dp0"
 
-echo Checking for required Python package (pyyaml)...
-py -m pip show pyyaml >nul 2>&1
+py -c "import yaml, PIL, filetype, voluptuous, pyffmpeg" >nul 2>&1
 if errorlevel 1 (
-    echo Installing pyyaml...
-    py -m pip install pyyaml
+    echo Installing required Python packages - first run only, may take a minute...
+    py -m pip install -r requirements.txt
 )
 
 echo Starting Edgeware++ Advanced Pack Builder...
-py edgeware_pack_builder_gui.py
-
-if errorlevel 1 (
-    echo.
-    echo The program closed with an error - see above.
-    pause
-)
+REM pyw = windowless; startup errors go to startup_error.log.
+start "" pyw edgeware_pack_builder_gui.pyw 2>"%~dp0startup_error.log"

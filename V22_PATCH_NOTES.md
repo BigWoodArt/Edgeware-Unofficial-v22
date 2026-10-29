@@ -2805,3 +2805,14 @@ Normal (non Do Not Press) runs are unchanged. Every Panic route (hotkey,
 tray, popup key, panic.pyw) already goes through the lockout check.
 
 Version bumped to v22.3.9.
+
+## 79. v22.3.10 - Bundled Pack Builder v1.0.8
+
+`pack_tool/Edgeware-Pack-Builder/` replaced with v1.0.8 from
+BigWoodArt/Edgeware-Pack-Builder (was v0.15). The GUI is now
+`edgeware_pack_builder_gui.pyw`; the old `.py` and `builder_settings.json`
+are gone. The upstream copy's own `pack_tool/` is not included: the Pack Tool
+already in this repo's `pack_tool/` is identical, and the Builder finds it
+as a sibling folder.
+
+Version bumped to v22.3.10.
