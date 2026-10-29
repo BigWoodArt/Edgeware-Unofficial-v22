@@ -10,16 +10,22 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v3
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.12"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
       - name: Lint
         run: ruff check src
+
+      - name: Check the app compiles
+        run: python -m compileall -q src
+
+      - name: Check config.pyw and the Pack Builder for undefined names and syntax errors
+        run: ruff check --select F,E9 --no-cache config.pyw config_original.pyw ../pack_tool/Edgeware-Pack-Builder/edgeware_pack_builder_gui.pyw
 
   format:
     runs-on: ubuntu-22.04
@@ -30,10 +36,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v3
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.12"
 
       - name: Install dependencies
         run: pip install -r requirements.txt

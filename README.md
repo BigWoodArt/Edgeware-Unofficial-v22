@@ -123,6 +123,8 @@ Entries are kept to 20 words or less.
 * A pack's own settings under Pack Priority were silently wiped out at corruption's first level - fixed.
 * New optional full-screen spiral overlay with paired binaural audio, reacting to session intensity with hard opacity/volume caps.
 
+**v22.3.11** - Package versions are now limited to tested ranges. CI runs on Python 3.12 and also checks config.pyw and the Pack Builder.
+
 **v22.3.10** - Bundled Pack Builder updated from v0.15 to v1.0.8.
 
 **v22.3.9** - Do Not Press: Panic Lockout now stays on through the whole random wait, and its countdown starts when popups begin.

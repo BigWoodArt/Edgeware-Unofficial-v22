@@ -2816,3 +2816,16 @@ already in this repo's `pack_tool/` is identical, and the Builder finds it
 as a sibling folder.
 
 Version bumped to v22.3.10.
+
+## 80. v22.3.11 - Pinned dependencies and stronger CI
+
+- `requirements.txt`: every package now has a version range around the
+  version tested (for example `pyglet>=2.1,<2.2`). Fresh installs no longer
+  pick up untested major releases. `ruff` is also bounded so the format
+  check stays stable.
+- CI runs on Python 3.12 (what Edgeware targets) with `setup-python@v5`.
+- New CI steps: `compileall` on `src`, and `ruff --select F,E9` (undefined
+  names and syntax errors) on `config.pyw`, `config_original.pyw` and the
+  Pack Builder GUI.
+
+Version bumped to v22.3.11.
