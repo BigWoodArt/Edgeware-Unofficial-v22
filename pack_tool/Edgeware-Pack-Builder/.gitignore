@@ -1,0 +1,12 @@
+# Extracted/loaded packs
+loaded_packs/
+
+# Runtime logs
+crash_log.txt
+startup_error.log
+
+# Python
+__pycache__/
+
+# Updater backup
+_update_backup/

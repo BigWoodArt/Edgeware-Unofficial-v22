@@ -2829,3 +2829,12 @@ Version bumped to v22.3.10.
   Pack Builder GUI.
 
 Version bumped to v22.3.11.
+
+## 81. v22.3.12 - Missing Pack Builder files
+
+`pack_tool/.gitignore` (`*/*`) hid the new Pack Builder's
+`edgeware_pack_builder_gui.pyw`, icons, LICENSE and `.gitignore`, so v22.3.10
+and v22.3.11 shipped without the GUI, and the new CI step failed on the
+missing file. The files are now added explicitly (`git add -f`).
+
+Version bumped to v22.3.12.
