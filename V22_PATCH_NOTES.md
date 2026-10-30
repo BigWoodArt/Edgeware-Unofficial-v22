@@ -2838,3 +2838,33 @@ and v22.3.11 shipped without the GUI, and the new CI step failed on the
 missing file. The files are now added explicitly (`git add -f`).
 
 Version bumped to v22.3.12.
+
+## 82. v22.3.13 - Reliable desktop shortcuts
+
+Shortcuts could fail or point at nothing. Fixes in `os_utils/windows.py`:
+
+- The Desktop folder is asked from Windows (`WScript.Shell`), so a
+  OneDrive-redirected Desktop works. Falls back to the OneDrive folders from
+  the environment, then `~\Desktop`. If none exists the error lists what was
+  tried.
+- Shortcuts run `pythonw.exe` with the real script (`main_edgeware.py`,
+  `panic.py`, `config.pyw`) instead of `edgeware.pyw`/`panic.pyw`, which only
+  EdgewareSetup.bat creates. The same applies to the Startup shortcut and the
+  scheduled task. The shortcut also uses the Python that created it, so the
+  3.12 fallback from v22.3.8 keeps working.
+- No more temporary batch/VBScript files, so odd characters in a path
+  (`&`, `%`) no longer break it.
+
+New: "Create desktop shortcuts" button in the config sidebar. It creates
+"Edgeware++" (starts the most recently selected pack), "Edgeware++ Config"
+and "Edgeware++ Panic" (stops everything), then reports the folder and any
+failures. Existing shortcuts with those names are replaced.
+
+Panic launched when Edgeware isn't running now shows a message instead of
+failing silently. If a Panic lockout is active the shortcut still asks for the
+safeword.
+
+Not tested on Windows; the OneDrive folder selection was checked with a
+simulation.
+
+Version bumped to v22.3.13.

@@ -21,7 +21,6 @@ import logging
 import os
 import subprocess
 import sys
-import tempfile
 from ctypes import windll
 from pathlib import Path
 from tkinter import Toplevel
@@ -30,10 +29,13 @@ import mpv
 import win32com.client
 from paths import PATH, CustomAssets, Process
 
-PYW = {
+# What each shortcut runs. Launching the real scripts directly (instead of
+# edgeware.pyw/panic.pyw, which only EdgewareSetup.bat creates) means shortcuts
+# work no matter how Edgeware was installed.
+SHORTCUT_SCRIPTS = {
     Process.CONFIG: PATH / "config.pyw",
-    Process.MAIN: PATH / "edgeware.pyw",
-    Process.PANIC: PATH / "panic.pyw",
+    Process.MAIN: Process.MAIN,
+    Process.PANIC: Process.PANIC,
 }
 
 DWMWA_TRANSITIONS_FORCEDISABLED = 3
@@ -101,50 +103,43 @@ def open_directory(url: str) -> None:
     subprocess.Popen(f'explorer "{url}"')
 
 
-def make_shortcut(title: str, process: Path, icon: Path, location: Path | None = None) -> None:
-    filename = f"{title}.lnk"
-    file = (location if location else Path(os.path.expanduser("~\\Desktop"))) / filename
-
-    pyw_process = PYW[process]
-
-    with tempfile.NamedTemporaryFile(
-        "w",
-        suffix=".bat",
-        delete=False,
-    ) as bat:
-        bat.writelines(
-            [
-                '@echo off\nset SCRIPT="%TEMP%\\%RANDOM%-%RANDOM%-%RANDOM%-%RANDOM%.vbs"\n',
-                'echo Set oWS = WScript.CreateObject("WScript.Shell") >> %SCRIPT%\n',
-                'echo sLinkFile = "' + str(file) + '" >> %SCRIPT%\n',
-                "echo Set oLink = oWS.CreateShortcut(sLinkFile) >> %SCRIPT%\n",
-                'echo oLink.WorkingDirectory = "' + str(pyw_process.parent) + '\\" >> %SCRIPT%\n',
-                'echo oLink.IconLocation = "' + str(icon) + '" >> %SCRIPT%\n',
-                'echo oLink.TargetPath = "' + str(pyw_process) + '" >> %SCRIPT%\n',
-                "echo oLink.Save >> %SCRIPT%\n",
-                "cscript /nologo %SCRIPT%\n",
-                "del %SCRIPT%",
-            ]
-        )  # write built shortcut script text to temporary batch file
-
+def desktop_folder() -> Path:
+    """The Desktop folder Windows actually shows, including a OneDrive-redirected one."""
+    candidates = []
     try:
-        result = subprocess.run(bat.name, capture_output=True, text=True)
-    except Exception as e:
-        raise OSError(f"Couldn't run the shortcut-creation script: {e}") from e
-    finally:
-        if os.path.exists(bat.name):
-            os.remove(bat.name)
+        candidates.append(Path(win32com.client.Dispatch("WScript.Shell").SpecialFolders("Desktop")))
+    except Exception:
+        logging.exception("Could not ask Windows for the Desktop folder")
+    home = Path.home()
+    for env in ("OneDrive", "OneDriveConsumer", "OneDriveCommercial"):
+        if os.environ.get(env):
+            candidates.append(Path(os.environ[env]) / "Desktop")
+    candidates.append(home / "Desktop")
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+    raise OSError("Could not find your Desktop folder. Tried: " + ", ".join(str(c) for c in candidates))
 
-    # subprocess.run() has no way to know the VBS script's own internal
-    # result - "cscript /nologo" suppresses the interpreter banner but not
-    # a script-level error (e.g. WshShortcut.Save failing because the
-    # target folder is a OneDrive-synced Desktop that refused the write),
-    # and that failure doesn't turn into a nonzero exit code or a raised
-    # Python exception either way. The only way to actually know if this
-    # worked is to check whether the .lnk file exists afterward.
+
+def make_shortcut(title: str, process: Path, icon: Path, location: Path | None = None) -> None:
+    folder = location or desktop_folder()
+    folder.mkdir(parents=True, exist_ok=True)
+    file = folder / f"{title}.lnk"
+
+    python = Path(sys.executable)
+    pythonw = python.with_name("pythonw.exe")  # No console window
+    script = SHORTCUT_SCRIPTS[process]
+
+    link = win32com.client.Dispatch("WScript.Shell").CreateShortCut(str(file))
+    link.TargetPath = str(pythonw if pythonw.exists() else python)
+    link.Arguments = f'"{script}"'
+    link.WorkingDirectory = str(PATH)
+    link.IconLocation = str(icon)
+    link.Save()
+
+    # Save() can fail without raising (for example on a cloud-synced folder that refuses the write)
     if not file.exists():
-        detail = result.stdout.strip() or result.stderr.strip() or "no further detail was reported"
-        raise OSError(f'Shortcut "{file}" was not created ({detail})')
+        raise OSError(f'Shortcut "{file}" was not created')
 
 
 def toggle_run_at_startup(state: bool) -> None:
@@ -217,7 +212,7 @@ def set_schedule(vars) -> None:  # noqa: ANN001
     # entirely - the same approach edgeware.pyw's own stub already uses
     # (subprocess.run([sys.executable, ...])) to launch a script.
     action.Path = sys.executable
-    action.Arguments = f'"{PYW[Process.MAIN]}"'
+    action.Arguments = f'"{Process.MAIN}"'
 
     # Set parameters
     task_def.RegistrationInfo.Description = "Edgeware++"

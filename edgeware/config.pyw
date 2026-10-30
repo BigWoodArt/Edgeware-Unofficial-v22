@@ -21,7 +21,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP = "Edgeware++ Configuration"
-VERSION = "22.3.12"
+VERSION = "22.3.13"
 # Points at this fork's repo, not the original Araten/EdgewarePlusPlus repo.
 UPDATE_CHECK_URL = "https://raw.githubusercontent.com/BigWoodArt/Edgeware-Unofficial-v22/main/edgeware/config.pyw"
 UPDATE_RELEASES_URL = "https://github.com/BigWoodArt/Edgeware-Unofficial-v22"
@@ -1140,7 +1140,7 @@ class App:
         self.nav_divider=tk.Frame(self.nav, bg=self.palette["border"], height=1)
         self.nav_divider.pack(fill="x", padx=9, pady=7)
         self.nav_action_buttons=[]
-        for text,cmd,bold in [("Import Pack",self.import_pack_ui,True),("Reset to defaults",self.reset_defaults,False),("Open Edgeware folder",self.open_root,False)]:
+        for text,cmd,bold in [("Import Pack",self.import_pack_ui,True),("Reset to defaults",self.reset_defaults,False),("Open Edgeware folder",self.open_root,False),("Create desktop shortcuts",self.create_shortcuts,False)]:
             b=tk.Button(self.nav, text=text, anchor="w", relief="flat", bd=0, padx=11, pady=5, cursor="hand2", font=("Segoe UI",10,"bold" if bold else "normal"), command=cmd)
             b.pack(fill="x", padx=5); self.nav_action_buttons.append(b)
         self.do_not_press_nav_btn=tk.Button(self.nav, text="DO NOT PRESS", anchor="w", relief="flat", bd=0, padx=11, pady=5, cursor="hand2", font=("Segoe UI",10,"bold"), command=self.do_not_press_nav_clicked)
@@ -2227,6 +2227,29 @@ class App:
         def on_close():
             cancel.set(); self.booru_test_running=False; win.destroy()
         win.protocol("WM_DELETE_WINDOW",on_close)
+
+    def create_shortcuts(self):
+        """Creates the Edgeware, Config and Panic (stop) shortcuts on the Desktop (OneDrive-aware) and reports exactly what happened."""
+        if os.name!="nt":
+            messagebox.showinfo(APP,"Desktop shortcuts are only created by this button on Windows."); return
+        src_path=str(HERE/"src")
+        if src_path not in sys.path: sys.path.insert(0,src_path)
+        if str(DATA) not in os.environ.get("PATH",""): os.environ["PATH"]+=os.pathsep+str(DATA)
+        try: os.add_dll_directory(str(DATA))
+        except (AttributeError,OSError): pass
+        try:
+            import os_utils
+            from paths import CustomAssets, Process
+            folder=os_utils.desktop_folder()
+        except Exception as e:
+            messagebox.showerror(APP,f"Could not create shortcuts.\n\n{e}"); return
+        made,failed=[],[]
+        for title,process,icon in [("Edgeware++",Process.MAIN,CustomAssets.icon()),("Edgeware++ Config",Process.CONFIG,CustomAssets.config_icon()),("Edgeware++ Panic",Process.PANIC,CustomAssets.panic_icon())]:
+            try: os_utils.make_shortcut(title,process,icon); made.append(title)
+            except Exception as e: failed.append(f"{title}: {e}")
+        text=f"Folder: {folder}\n\nCreated: {', '.join(made) or 'none'}"
+        if failed: messagebox.showwarning(APP,text+"\n\nFailed:\n"+"\n".join(failed))
+        else: messagebox.showinfo(APP,text+"\n\n'Edgeware++' starts your most recently selected pack. 'Edgeware++ Panic' stops everything - if a Panic lockout is active it asks for the safeword.")
 
     def open_root(self):
         try:

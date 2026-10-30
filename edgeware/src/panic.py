@@ -222,4 +222,9 @@ def ensure_panic_wallpaper() -> None:
 
 
 if __name__ == "__main__":
-    send_panic()
+    from startup_check import show_error
+
+    try:
+        send_panic()
+    except OSError:
+        show_error("Edgeware++ Panic", "Edgeware++ doesn't seem to be running, so there is nothing to stop.", warning=True)
