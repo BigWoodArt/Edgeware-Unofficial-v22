@@ -110,6 +110,20 @@ def report_fatal(error: BaseException, log_dir: Path) -> None:
     )
 
 
+def report_empty_pack(pack_path: Path) -> None:
+    """Warns that the selected pack has no images, videos or audio, so nothing would appear."""
+    problem = (
+        "The folder does not exist." if not pack_path.is_dir() else "The folder has no images, videos or audio in the places Edgeware looks (img, vid, aud)."
+    )
+    show_error(
+        "Edgeware++ has nothing to show",
+        f"The selected pack has no media:\n{pack_path}\n\n{problem}\n\n"
+        "Fix: open the config, pick a different pack (or import it again), then Save. "
+        "If you use the Default pack, add media to it or choose a pack.",
+        warning=True,
+    )
+
+
 class _ErrorCounter(logging.Handler):
     def __init__(self) -> None:
         super().__init__(level=logging.ERROR)

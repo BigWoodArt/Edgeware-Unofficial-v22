@@ -2868,3 +2868,20 @@ Not tested on Windows; the OneDrive folder selection was checked with a
 simulation.
 
 Version bumped to v22.3.13.
+
+## 83. v22.3.14 - Missing pack silently reset to Default
+
+Reported: the desktop "Edgeware++" shortcut showed only the splash screen
+and played no images. The log showed `packPath: None` and "Loading pack at
+resource". An earlier config had saved a pack name (`Porn TherapyWare`)
+whose folder was not in `data/packs`. `config.pyw` showed that name in the
+dropdown, but on Save looked it up in the list of existing packs, found
+nothing, and wrote `None` (Default pack) without telling anyone.
+
+- `config.pyw`: if the saved pack is not in `data/packs`, the dropdown now
+  shows "Default pack" and a warning explains why (once per session).
+- `main_edgeware.py`: if the selected pack has no images, videos or audio
+  (and booru downloading is off), a dialog names the folder and explains
+  how to fix it. Skipped for Do Not Press runs, which are unattended.
+
+Version bumped to v22.3.14.

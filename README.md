@@ -123,6 +123,8 @@ Entries are kept to 20 words or less.
 * A pack's own settings under Pack Priority were silently wiped out at corruption's first level - fixed.
 * New optional full-screen spiral overlay with paired binaural audio, reacting to session intensity with hard opacity/volume caps.
 
+**v22.3.14** - Fix: a saved pack that no longer exists was silently reset to the Default pack on Save, so the Start shortcut showed only the splash. The config now warns about it, and Edgeware warns when the selected pack has no media.
+
 **v22.3.13** - Desktop shortcuts (Start, Config, Panic/Stop) rebuilt to work with OneDrive Desktops and without EdgewareSetup. New "Create desktop shortcuts" button in the config sidebar.
 
 **v22.3.12** - Fix: the bundled Pack Builder v1.0.8 files were missing from v22.3.10 and v22.3.11.

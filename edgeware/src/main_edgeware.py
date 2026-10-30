@@ -97,7 +97,7 @@ from panic import ensure_panic_wallpaper, start_panic_listener
 from paths import Data
 from roll import RollTarget, roll_targets
 from scripting import run_script
-from startup_check import report_fatal, start_watchdog
+from startup_check import report_empty_pack, report_fatal, start_watchdog
 from state import State
 from voluptuous.error import Invalid
 
@@ -241,6 +241,9 @@ if __name__ == "__main__":
 
         pack = Pack(settings.pack_path)
         state = State()
+
+        if not (pack.images or pack.videos or pack.audio) and not settings.booru_download and not do_not_press:
+            report_empty_pack(settings.pack_path)
 
         apply_pack_priority(settings, pack)  # Before anything reads settings.corruption_mode etc. below
         settings.corruption_mode = settings.corruption_mode and pack.corruption_levels

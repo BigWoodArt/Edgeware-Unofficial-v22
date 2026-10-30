@@ -21,7 +21,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP = "Edgeware++ Configuration"
-VERSION = "22.3.13"
+VERSION = "22.3.14"
 # Points at this fork's repo, not the original Araten/EdgewarePlusPlus repo.
 UPDATE_CHECK_URL = "https://raw.githubusercontent.com/BigWoodArt/Edgeware-Unofficial-v22/main/edgeware/config.pyw"
 UPDATE_RELEASES_URL = "https://github.com/BigWoodArt/Edgeware-Unofficial-v22"
@@ -1190,6 +1190,10 @@ class App:
         # their last-set value even after their widgets are destroyed.
         self.select_nav(section)
         self.refresh_packs()
+        saved_pack=self.cfg.get("packPath")
+        if saved_pack and saved_pack not in self.pack_map and not getattr(self,"_missing_pack_warned",False):
+            self._missing_pack_warned=True
+            self.root.after(300,lambda:messagebox.showwarning(APP,f"The saved pack '{saved_pack}' was not found in data\\packs, so 'Default pack' is shown. Edgeware would run with no media from it.\n\nPick a pack from the list (or import it again) and Save."))
         self.pack_overrides=read_pack_overrides(self.cfg.get("packPath"))
         tk.Label(self.page,text=section.upper(),bg=self.palette["panel"],fg=self.palette["white"],font=("Segoe UI",17,"bold")).pack(anchor="w",padx=16,pady=(13,1))
         tk.Label(self.page,text=DESCRIPTIONS[section],bg=self.palette["panel"],fg=self.palette["muted"],font=("Segoe UI",10),wraplength=760,justify="left").pack(anchor="w",padx=16,pady=(0,8))
@@ -1218,7 +1222,7 @@ class App:
         if typ=="bool":
             result = truth(v)
             return (not result) if key in INVERTED_BOOL_KEYS else result
-        if typ=="pack": return "Default pack" if not v else str(v)
+        if typ=="pack": return str(v) if v and str(v) in self.pack_map else "Default pack"
         if typ=="corner":
             names=["Top-Right","Top-Left","Bottom-Left","Bottom-Right"]
             try:return names[max(0,min(3,int(v)))]
