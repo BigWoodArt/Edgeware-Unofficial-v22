@@ -32,7 +32,7 @@ from tkinter import (
 )
 
 from pack import Pack
-from paths import DEFAULT_PACK_PATH, CustomAssets, Data
+from paths import DEFAULT_PACK_PATH, CustomAssets, Data, resolve_pack_root
 
 from config import load_default_config
 from config.themes import theme_change
@@ -62,7 +62,7 @@ from config.window.widgets.layout import ConfigMessage
 
 config["wallpaperDat"] = ast.literal_eval(config["wallpaperDat"])
 default_config = load_default_config()
-pack = Pack(Data.PACKS / config["packPath"] if config["packPath"] else DEFAULT_PACK_PATH)
+pack = Pack(resolve_pack_root(Data.PACKS / config["packPath"]) if config["packPath"] else DEFAULT_PACK_PATH)
 
 
 pil_logger = logging.getLogger("PIL")

@@ -94,7 +94,7 @@ from os_utils import is_linux, is_windows
 from os_utils.linux_utils import get_desktop_environment
 from pack import Pack
 from panic import ensure_panic_wallpaper, start_panic_listener
-from paths import Data
+from paths import Data, resolve_pack_root
 from roll import RollTarget, roll_targets
 from scripting import run_script
 from startup_check import report_empty_pack, report_fatal, start_watchdog
@@ -232,7 +232,7 @@ if __name__ == "__main__":
         if do_not_press:
             random_pack = pick_random_pack_path()
             if random_pack is not None:
-                settings.pack_path = random_pack
+                settings.pack_path = resolve_pack_root(random_pack)
             # Force panic lockout on for this session regardless of the saved
             # setting, in case config.pyw's own write of it didn't take for some
             # reason - the whole point of this feature is that this is never

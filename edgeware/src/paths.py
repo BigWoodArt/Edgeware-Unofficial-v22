@@ -22,6 +22,18 @@ PATH = Path(__file__).parent.parent
 DEFAULT_PACK_PATH = PATH / "resource"
 
 
+def resolve_pack_root(path: Path) -> Path:
+    """Returns `path`, or the single pack folder inside it when the pack was extracted one level too deep (packs/Name/Name/img)."""
+
+    def looks_like_pack(folder: Path) -> bool:
+        return any((folder / name).exists() for name in ("index.json", "info.json", "media.json", "img", "vid", "aud"))
+
+    if looks_like_pack(path) or not path.is_dir():
+        return path
+    inner = [child for child in path.iterdir() if child.is_dir() and looks_like_pack(child)]
+    return inner[0] if len(inner) == 1 else path
+
+
 @dataclass
 class Process:
     ROOT = PATH / "src"

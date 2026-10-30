@@ -2885,3 +2885,21 @@ nothing, and wrote `None` (Default pack) without telling anyone.
   how to fix it. Skipped for Do Not Press runs, which are unattended.
 
 Version bumped to v22.3.14.
+
+## 84. v22.3.15 - Pack extracted one folder too deep
+
+Reported: with pack `BiConvertWare` selected, only the splash showed and no
+images appeared. The pack's files were in `data/packs/BiConvertWare/BiConvertWare/`
+(an extra folder level), so Edgeware found no `img`, `index.json` or
+`info.json` at `data/packs/BiConvertWare/`.
+
+- New `resolve_pack_root()` in `src/paths.py`: if a pack folder has none of
+  the usual pack items but contains exactly one subfolder that does, that
+  subfolder is used. Normal packs are untouched. Applied in `Settings`, Do Not
+  Press's random pack pick and the classic config window.
+- `config.pyw` uses the same rule (`pack_dir_of`) for pack overrides, the
+  corruption preview and the WebP/GIF tools.
+
+The v22.3.14 empty-pack warning also names the folder when nothing is found.
+
+Version bumped to v22.3.15.

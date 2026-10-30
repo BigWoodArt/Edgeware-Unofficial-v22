@@ -17,7 +17,7 @@
 
 import logging
 
-from paths import DEFAULT_PACK_PATH, Data
+from paths import DEFAULT_PACK_PATH, Data, resolve_pack_root
 from voluptuous.error import Invalid
 
 from config import load_config, load_default_config
@@ -46,7 +46,7 @@ class Settings:
 
             setattr(self, name, item.setting(value))
 
-        self.pack_path = Data.PACKS / self.pack_path if self.pack_path else DEFAULT_PACK_PATH
+        self.pack_path = resolve_pack_root(Data.PACKS / self.pack_path) if self.pack_path else DEFAULT_PACK_PATH
         self.hibernate_fix_wallpaper = self.hibernate_fix_wallpaper and self.hibernate_mode
 
         import os_utils  # Circular import

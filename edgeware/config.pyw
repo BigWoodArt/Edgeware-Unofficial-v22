@@ -21,7 +21,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP = "Edgeware++ Configuration"
-VERSION = "22.3.14"
+VERSION = "22.3.15"
 # Points at this fork's repo, not the original Araten/EdgewarePlusPlus repo.
 UPDATE_CHECK_URL = "https://raw.githubusercontent.com/BigWoodArt/Edgeware-Unofficial-v22/main/edgeware/config.pyw"
 UPDATE_RELEASES_URL = "https://github.com/BigWoodArt/Edgeware-Unofficial-v22"
@@ -690,6 +690,15 @@ def key_to_display(value):
     return value or "Not set"
 
 
+def pack_dir_of(name):
+    """Folder of a pack in data/packs, or the one pack folder inside it when it was extracted one level too deep (packs/Name/Name/img)."""
+    path=PACKS/str(name)
+    def looks_like_pack(folder): return any((folder/n).exists() for n in ("index.json","info.json","media.json","img","vid","aud"))
+    if looks_like_pack(path) or not path.is_dir(): return path
+    inner=[c for c in path.iterdir() if c.is_dir() and looks_like_pack(c)]
+    return inner[0] if len(inner)==1 else path
+
+
 def import_pack(parent):
     zpath = filedialog.askopenfilename(parent=parent, title="Import Edgeware Pack", filetypes=[("ZIP files", "*.zip"), ("All files", "*.*")])
     if not zpath:
@@ -958,7 +967,7 @@ def read_pack_overrides(pack_name):
     conversion - the coercion here is deliberately simpler since this is
     just a preview, not what actually runs."""
     if not pack_name: return {}
-    pack_config=PACKS/str(pack_name)/"config.json"
+    pack_config=pack_dir_of(pack_name)/"config.json"
     if not pack_config.is_file(): return {}
     overrides=load_json(pack_config,{})
     if not isinstance(overrides,dict): return {}
@@ -1343,7 +1352,7 @@ class App:
 
     def add_corruption_preview(self):
         pack_name=self.cfg.get("packPath")
-        pack_dir=(PACKS/str(pack_name)) if pack_name else None
+        pack_dir=pack_dir_of(pack_name) if pack_name else None
         if not pack_dir or not pack_dir.is_dir():
             tk.Label(self.page,text="Select a pack on the Start page first.",bg=self.palette["panel"],fg=self.palette["muted"],font=("Segoe UI",9)).pack(anchor="w",padx=16,pady=8)
             return
@@ -1952,7 +1961,7 @@ class App:
 
     def convert_webp_ui(self):
         self.refresh_packs(); current=self.cfg.get("packPath")
-        pack_dir=(PACKS/current) if current else None
+        pack_dir=pack_dir_of(current) if current else None
         if not pack_dir or not pack_dir.is_dir():
             messagebox.showinfo(APP,"Select a pack first."); return
         files=list(pack_dir.rglob("*.webp"))+list(pack_dir.rglob("*.WEBP"))
@@ -1967,7 +1976,7 @@ class App:
 
     def convert_gif_ui(self):
         self.refresh_packs(); current=self.cfg.get("packPath")
-        pack_dir=(PACKS/current) if current else None
+        pack_dir=pack_dir_of(current) if current else None
         if not pack_dir or not pack_dir.is_dir():
             messagebox.showinfo(APP,"Select a pack first."); return
         all_gifs=list(pack_dir.rglob("*.gif"))+list(pack_dir.rglob("*.GIF"))
