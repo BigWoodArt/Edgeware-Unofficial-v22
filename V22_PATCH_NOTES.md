@@ -2903,3 +2903,18 @@ images appeared. The pack's files were in `data/packs/BiConvertWare/BiConvertWar
 The v22.3.14 empty-pack warning also names the folder when nothing is found.
 
 Version bumped to v22.3.15.
+
+## 85. v22.3.16 - Bad pack files no longer crash startup
+
+Reported: `KeyError: 'wallpapers'` from `load_corruption` while loading a pack.
+The schema treated every section as optional, but the code then read
+`corruption["wallpapers"]` directly.
+
+- `pack/load.py`: `moods`, `wallpapers` and `config` in `corruption.json` are
+  now truly optional; a missing section means no changes of that kind.
+- `try_load` also catches `KeyError`, `TypeError`, `ValueError` and
+  `AttributeError`, logs a warning naming the file, and returns nothing. Every
+  caller already falls back to a default, so a malformed optional pack file is
+  ignored instead of stopping Edgeware.
+
+Version bumped to v22.3.16.

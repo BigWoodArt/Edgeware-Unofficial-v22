@@ -46,6 +46,9 @@ def try_load(path: Path, load: Callable[[str], T]) -> T | None:
         logging.warning(f"{path.name} is not valid JSON. Reason: {e}")
     except Invalid as e:
         logging.warning(f"{path.name} format is invalid. Reason: {e}")
+    except (KeyError, TypeError, ValueError, AttributeError) as e:
+        # A pack file with unexpected contents must never stop Edgeware from starting
+        logging.warning(f"{path.name} could not be read and was ignored. Reason: {type(e).__name__}: {e}")
 
     return None
 
@@ -60,15 +63,16 @@ def load_corruption(paths: PackPaths) -> list[CorruptionLevel]:
 
         Schema(
             {
-                "moods": {Number(scale=0): {"add": [str], "remove": [str]}},
-                "wallpapers": {Any(Number(scale=0), "default"): str},
-                "config": {Number(scale=0): {str: Any(int, str)}},
+                Optional("moods"): {Number(scale=0): {"add": [str], "remove": [str]}},
+                Optional("wallpapers"): {Any(Number(scale=0), "default"): str},
+                Optional("config"): {Number(scale=0): {str: Any(int, str)}},
             }
         )(corruption)
 
-        moods = corruption["moods"]
-        wallpapers = corruption["wallpapers"]
-        configs = corruption["config"]
+        # Each section is optional; a missing one means no changes of that kind
+        moods = corruption.get("moods", {})
+        wallpapers = corruption.get("wallpapers", {})
+        configs = corruption.get("config", {})
 
         levels: list[CorruptionLevel] = []
         for i in range(max(len(moods), len(wallpapers) - (1 if "default" in wallpapers else 0), len(configs))):
