@@ -21,7 +21,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP = "Edgeware++ Configuration"
-VERSION = "22.3.17"
+VERSION = "22.3.18"
 # Points at this fork's repo, not the original Araten/EdgewarePlusPlus repo.
 UPDATE_CHECK_URL = "https://raw.githubusercontent.com/BigWoodArt/Edgeware-Unofficial-v22/main/edgeware/config.pyw"
 UPDATE_RELEASES_URL = "https://github.com/BigWoodArt/Edgeware-Unofficial-v22"
@@ -30,13 +30,13 @@ UPDATE_ZIP_URL = UPDATE_RELEASES_URL + "/archive/refs/heads/main.zip"
 # as a plain list specifically so it's easy to extend later (e.g. adding
 # new spiral/binaural assets down the line just needs a new folder added
 # here, not a rewrite of the update logic itself).
-UPDATE_PATHS = ["src", "config.pyw", "assets", "extension"]
+UPDATE_PATHS = ["src", "config.pyw", "assets", "extension", "EdgewareSetup.bat", "requirements.txt"]
 # What gets backed up before an update is applied - deliberately narrower
 # than UPDATE_PATHS: assets/ is large (several MB, mostly big, rarely-
 # changing media) and a broken asset is a minor, easily-noticed problem,
 # not the kind of thing a rollback is really for. Keeping backups to just
 # the actual code keeps each one under a megabyte.
-BACKUP_PATHS = ["src", "config.pyw", "extension"]
+BACKUP_PATHS = ["src", "config.pyw", "extension", "EdgewareSetup.bat", "requirements.txt"]
 BACKUP_DIR_NAME = "update_backups"
 MAX_BACKUPS_KEPT = 2
 DO_NOT_PRESS_KEY = "_doNotPressArmed"

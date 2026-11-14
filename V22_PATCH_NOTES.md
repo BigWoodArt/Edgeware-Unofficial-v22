@@ -2944,3 +2944,19 @@ was never reached.
 Not tested on Windows (batch script reviewed only).
 
 Version bumped to v22.3.17.
+
+## 87. v22.3.18 - Updater also updates the setup files
+
+The in-app updater only replaced `src`, `config.pyw`, `assets` and
+`extension`, so fixes to `EdgewareSetup.bat` and `requirements.txt` (such as
+v22.3.17's Python detection) never reached existing installs.
+
+- `UPDATE_PATHS` and `BACKUP_PATHS` now include both files. The backup zip
+  stays small.
+- The running config uses its own list, so the first update from an older
+  version still skips these two files. Updates from v22.3.18 onward carry
+  them.
+- Updating does not run pip. After an update that changes
+  `requirements.txt`, run `EdgewareSetup.bat` again to install new packages.
+
+Version bumped to v22.3.18.
