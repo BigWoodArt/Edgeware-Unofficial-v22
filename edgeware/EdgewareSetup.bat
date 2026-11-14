@@ -6,57 +6,63 @@ reg Query "HKLM\Hardware\Description\System\CentralProcessor\0" | find /i "x86" 
 cd /D "%~dp0"
 
 echo +==============[ Welcome to Edgeware++ Setup~ ]==============+
-echo Python version:
-py --version
+echo Looking for Python 3.12 or newer...
+
+:: Every candidate is actually run, so a broken entry (for example an uninstalled
+:: Python that the "py" launcher still lists) is skipped instead of stopping setup.
+set PY=
+set PYW=
+call :tryPython "py -3.12"
+if not defined PY call :tryPython "py"
+if not defined PY call :tryPython "python"
+if defined PY goto havePython
+
+echo No working Python 3.12 or newer was found.
+echo Downloading the Python 3.12 installer from python.org, please wait...
+if %OS%==32BIT powershell -Command "Invoke-WebRequest https://www.python.org/ftp/python/3.12.6/python-3.12.6.exe -OutFile pyinstaller.exe"
+if %OS%==64BIT powershell -Command "Invoke-WebRequest https://www.python.org/ftp/python/3.12.6/python-3.12.6-amd64.exe -OutFile pyinstaller.exe"
+if not exist pyinstaller.exe goto pythonFailed
+echo Installing Python 3.12 for your user account. This takes a minute...
+start /wait "" "%CD%\pyinstaller.exe" /passive InstallAllUsers=0 PrependPath=1 Include_launcher=1
+del pyinstaller.exe
+call :tryPython "py -3.12"
+:: A fresh per-user install is not on this window's PATH yet, so also try its usual location
+if not defined PY if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" call :tryPythonExe "%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
+if not defined PY goto pythonFailed
+
+:havePython
+if "%PY%"=="py -3.12" set PYW=pyw -3.12
+echo Using: %PY%
+%PY% --version
 echo:
-echo NOTE: Python versions older than 3.12 might have compatability issues.
-echo If you are on one of these versions and experience issues with Edgeware++, try uninstalling them
-echo and running this installer again. (or download it yourself if you know what you're doing!)
-echo:
+goto pipCheck
 
-if not %errorlevel%==0 (
-  echo Could not find Python.
-  echo Downloading installer from python.org, please wait...
+:tryPython
+%~1 -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)" >nul 2>&1
+if %errorlevel%==0 set PY=%~1
+goto :eof
 
-  if %OS%==32BIT powershell -Command "Invoke-WebRequest https://www.python.org/ftp/python/3.12.6/python-3.12.6.exe -OutFile pyinstaller.exe"
-  if %OS%==64BIT powershell -Command "Invoke-WebRequest https://www.python.org/ftp/python/3.12.6/python-3.12.6-amd64.exe -OutFile pyinstaller.exe"
+:tryPythonExe
+"%~1" -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)" >nul 2>&1
+if %errorlevel%==0 set PY="%~1"
+if %errorlevel%==0 set PYW="%~dp1pythonw.exe"
+goto :eof
 
-  echo Done downloading executable.
-  echo Please complete installation through the installer before continuing, make sure "Add Python to PATH" is checked.
-  start "Python Installer" "%CD%\pyinstaller.exe"
-  pause
+:pythonFailed
+echo Could not set up Python 3.12.
+powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('Edgeware++ could not find or install Python 3.12. Please install Python 3.12 from python.org (tick Add Python to PATH), then run this installer again. If Python was installed before, it may be broken: uninstall it from Windows Settings > Apps first.', 'Edgeware++ Setup - Python Not Found', 'OK', 'Error')"
+pause
+exit
 
-  py --version
-  if not %errorlevel%==0 (
-    echo Python still could not be found.
-    pause
-    exit
-  )
-)
-
-:: Checked via Python's own sys.version_info tuple comparison rather than
-:: parsing "Python X.Y.Z" text out of "py --version" - comparing a tuple of
-:: ints is exact, where string-parsing version numbers in batch is fragile
-:: (e.g. breaks across two-vs-three-digit minor versions).
-py -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)"
-if not %errorlevel%==0 (
-  echo:
-  echo ============================================================
-  echo  WARNING: Your Python version is older than 3.12.
-  echo  Edgeware++ may not work correctly on this version.
-  echo ============================================================
-  echo:
-  powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('Your installed Python version is older than 3.12, which Edgeware++ may not work correctly on. You can continue anyway, but if you run into problems, consider uninstalling your current Python version and running this installer again to get a supported one.', 'Edgeware++ Setup - Python Version Warning', 'OK', 'Warning')"
-)
-
+:pipCheck
 echo pip version:
-py -m pip --version
+%PY% -m pip --version
 if not %errorlevel%==0 (
   echo Could not find pip.
   echo Installing pip with ensurepip...
-  py -m ensurepip --upgrade
+  %PY% -m ensurepip --upgrade
 
-  py -m pip --version
+  %PY% -m pip --version
   if not %errorlevel%==0 (
     echo pip still could not be found.
     pause
@@ -65,27 +71,30 @@ if not %errorlevel%==0 (
 )
 
 echo Installing requirements...
-set USE312=0
-py -m pip install -r requirements.txt
+%PY% -m pip install -r requirements.txt
 if %errorlevel%==0 goto requirementsDone
 
 :: Some packages (the winrt-* ones from desktop-notifier) have no prebuilt files
 :: for very new Python versions and fail to build. Retry with Python 3.12.
 echo:
-echo Install failed on your default Python. Trying Python 3.12 instead...
-py -3.12 --version
-if %errorlevel%==0 goto have312
+echo Install failed on this Python. Trying Python 3.12 instead...
+if "%PY%"=="py -3.12" goto requirementsFailed
+set PY=
+set PYW=
+call :tryPython "py -3.12"
+if defined PY goto have312
 echo Python 3.12 not found. Downloading it, please wait...
 if %OS%==32BIT powershell -Command "Invoke-WebRequest https://www.python.org/ftp/python/3.12.6/python-3.12.6.exe -OutFile py312.exe"
 if %OS%==64BIT powershell -Command "Invoke-WebRequest https://www.python.org/ftp/python/3.12.6/python-3.12.6-amd64.exe -OutFile py312.exe"
-if exist py312.exe start /wait "" "%CD%\py312.exe" /passive InstallAllUsers=0 PrependPath=0 Include_launcher=1
-py -3.12 --version
-if not %errorlevel%==0 goto requirementsFailed
+if exist py312.exe start /wait "" "%CD%\py312.exe" /passive InstallAllUsers=0 PrependPath=1 Include_launcher=1
+call :tryPython "py -3.12"
+if not defined PY if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" call :tryPythonExe "%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
+if not defined PY goto requirementsFailed
 
 :have312
-py -3.12 -m pip install -r requirements.txt
+%PY% -m pip install -r requirements.txt
 if not %errorlevel%==0 goto requirementsFailed
-set USE312=1
+if "%PY%"=="py -3.12" set PYW=pyw -3.12
 goto requirementsDone
 
 :requirementsFailed
@@ -138,8 +147,8 @@ echo config.pyw: runs the config window which allows changing Edgeware++ setting
 echo edgeware.pyw: starts Edgeware++ with the config settings you have saved
 echo panic.pyw: kills Edgeware++ and all currently spawned popups
 pause
-if %USE312%==1 (
-  start "Edgeware++ Config" pyw -3.12 "%CD%/config.pyw"
+if defined PYW (
+  start "Edgeware++ Config" %PYW% "%CD%/config.pyw"
 ) else (
   start "Edgeware++ Config" "%CD%/config.pyw"
 )

@@ -123,6 +123,8 @@ Entries are kept to 20 words or less.
 * A pack's own settings under Pack Priority were silently wiped out at corruption's first level - fixed.
 * New optional full-screen spiral overlay with paired binaural audio, reacting to session intensity with hard opacity/volume caps.
 
+**v22.3.17** - EdgewareSetup.bat finds a working Python 3.12+ by actually running each candidate, skips broken/uninstalled Python entries, and installs Python 3.12 automatically when none works.
+
 **v22.3.16** - A pack file with missing or unexpected contents (for example a corruption.json without "wallpapers") no longer crashes startup. It is skipped with a warning in the log.
 
 **v22.3.15** - Packs extracted one folder too deep (data/packs/Name/Name/img) now load. Previously they ran with no media.

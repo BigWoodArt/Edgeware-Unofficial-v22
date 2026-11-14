@@ -2918,3 +2918,29 @@ The schema treated every section as optional, but the code then read
   ignored instead of stopping Edgeware.
 
 Version bumped to v22.3.16.
+
+## 86. v22.3.17 - Setup survives a broken Python install
+
+Reported: setup printed "Unable to create process using ...\Python313\python.exe"
+and kept asking to install Python, even after the user installed it with
+PATH ticked. The `py` launcher still listed an uninstalled Python 3.13, so
+plain `py --version` failed every time and the 3.12 they had just installed
+was never reached.
+
+`EdgewareSetup.bat` now:
+- Runs each candidate (`py -3.12`, `py`, `python`) with a real version
+  check and uses the first that works. Broken entries are skipped silently.
+- If none works, downloads Python 3.12 and installs it for the current user
+  (`/passive`, PATH and launcher included) with no manual installer steps.
+  A fresh install isn't on the current window's PATH, so its usual folder is
+  also tried.
+- Uses the chosen Python for pip and requirements, and for starting the config
+  (`pyw -3.12` or the exact `pythonw.exe`).
+- Keeps the v22.3.8 retry on 3.12 when a package fails to build on a newer
+  Python.
+- If everything fails, shows a message telling the user to uninstall a broken
+  Python from Windows Settings > Apps.
+
+Not tested on Windows (batch script reviewed only).
+
+Version bumped to v22.3.17.
