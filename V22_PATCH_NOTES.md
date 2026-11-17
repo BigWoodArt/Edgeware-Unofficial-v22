@@ -2960,3 +2960,22 @@ v22.3.17's Python detection) never reached existing installs.
   `requirements.txt`, run `EdgewareSetup.bat` again to install new packages.
 
 Version bumped to v22.3.18.
+
+## 88. v22.3.19 - False "Python still could not be found"
+
+Reported: after installing Python 3.12.6 from the setup prompt, the window
+printed `Python 3.12.6` and then "Python still could not be found." The old
+script checked `%errorlevel%` inside a ( ) block. Batch files read
+`%errorlevel%` once when the whole block starts, so the check used the failure
+code from before the install. Python was installed correctly; running setup
+again worked.
+
+- v22.3.17 already replaced that block with a real detection loop.
+- The pip check had the same nested-block pattern (it would wrongly report "pip
+  still could not be found" after a successful `ensurepip`). It now uses
+  labels, and a comment in the script explains why.
+
+Users on an older `EdgewareSetup.bat` should close the window and run it
+again, or use the new file.
+
+Version bumped to v22.3.19.

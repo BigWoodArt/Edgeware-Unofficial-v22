@@ -123,6 +123,8 @@ Entries are kept to 20 words or less.
 * A pack's own settings under Pack Priority were silently wiped out at corruption's first level - fixed.
 * New optional full-screen spiral overlay with paired binaural audio, reacting to session intensity with hard opacity/volume caps.
 
+**v22.3.19** - Fix: setup could say "Python still could not be found" right after installing it successfully (a batch-file bug). The checks no longer depend on it.
+
 **v22.3.18** - The in-app updater now also replaces EdgewareSetup.bat and requirements.txt, so setup and dependency fixes arrive with updates.
 
 **v22.3.17** - EdgewareSetup.bat finds a working Python 3.12+ by actually running each candidate, skips broken/uninstalled Python entries, and installs Python 3.12 automatically when none works.

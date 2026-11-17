@@ -8,6 +8,9 @@ cd /D "%~dp0"
 echo +==============[ Welcome to Edgeware++ Setup~ ]==============+
 echo Looking for Python 3.12 or newer...
 
+:: Note: %errorlevel% inside a ( ) block is read once, when the block starts, so every
+:: check below uses goto/labels instead of nested blocks.
+
 :: Every candidate is actually run, so a broken entry (for example an uninstalled
 :: Python that the "py" launcher still lists) is skipped instead of stopping setup.
 set PY=
@@ -57,18 +60,17 @@ exit
 :pipCheck
 echo pip version:
 %PY% -m pip --version
-if not %errorlevel%==0 (
-  echo Could not find pip.
-  echo Installing pip with ensurepip...
-  %PY% -m ensurepip --upgrade
+if %errorlevel%==0 goto pipOk
+echo Could not find pip.
+echo Installing pip with ensurepip...
+%PY% -m ensurepip --upgrade
+%PY% -m pip --version
+if %errorlevel%==0 goto pipOk
+echo pip still could not be found.
+pause
+exit
 
-  %PY% -m pip --version
-  if not %errorlevel%==0 (
-    echo pip still could not be found.
-    pause
-    exit
-  )
-)
+:pipOk
 
 echo Installing requirements...
 %PY% -m pip install -r requirements.txt
