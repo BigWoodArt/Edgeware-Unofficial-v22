@@ -37,7 +37,10 @@ def _log_handler(loglevel: str, component: str, message: str) -> None:
     # as before this existed. Filtered to warn-and-above so this doesn't
     # flood with mpv's own routine chatter.
     if loglevel in ("warn", "error", "fatal"):
-        print(f"MPVLOG|{loglevel}|{component}|{message}", flush=True)
+        try:
+            print(f"MPVLOG|{loglevel}|{component}|{message}", flush=True)
+        except OSError:
+            pass  # stdout can be an unusable handle (no console); a lost log line must never stop playback
 
 
 player = mpv.MPV(wid=wid, log_handler=_log_handler)

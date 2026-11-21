@@ -34,7 +34,37 @@ def fail(message: str) -> None:
     sys.exit(1)
 
 
+class SafeStream:
+    """Wraps stdout/stderr so a broken handle never crashes a print().
+
+    A windowed exe started without a console can inherit a standard handle that exists but is unusable;
+    every print() then fails with `OSError: [Errno 22] Invalid argument`. pythonw avoids this by setting
+    the stream to None, so the scripts never had to care. Output that still works is passed through.
+    """
+
+    def __init__(self, stream):
+        self._stream = stream
+
+    def write(self, data):
+        try:
+            return self._stream.write(data) if self._stream else len(data)
+        except (OSError, ValueError):
+            return len(data)
+
+    def flush(self):
+        try:
+            if self._stream:
+                self._stream.flush()
+        except (OSError, ValueError):
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
 def run_script(script: Path, args: list[str]) -> None:
+    sys.stdout = SafeStream(sys.stdout)
+    sys.stderr = SafeStream(sys.stderr)
     if not script.is_file():
         fail(f"Edgeware could not find this file:\n{script}\n\nKeep the 'app' folder next to Edgeware.exe.")
     # Like the real interpreter: the script's folder is searched first, then the app folder.
