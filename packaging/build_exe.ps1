@@ -60,8 +60,8 @@ Copy-Item $cache $dllDest -Force
 if (Test-Path $keep) { Copy-Item "$keep\*" "$app\data" -Recurse -Force; Remove-Item $keep -Recurse -Force }
 
 if ($Zip) {
-    $zip = Join-Path $repo "dist\Edgeware.zip"
-    if (Test-Path $zip) { Remove-Item $zip }
-    Compress-Archive -Path $dist -DestinationPath $zip
+    $zipPath = Join-Path $repo "dist\Edgeware.zip"
+    if (Test-Path $zipPath) { Remove-Item $zipPath }
+    Compress-Archive -Path $dist -DestinationPath $zipPath
 }
 Write-Host "Done: $dist\Edgeware.exe"
